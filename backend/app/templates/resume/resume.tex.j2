@@ -1,0 +1,129 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[margin=0.58in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage[none]{hyphenat}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+\setlength{\emergencystretch}{2em}
+{% if content.classification == "Maps / Routing / Geospatial" %}
+\renewcommand{\baselinestretch}{1.10}\selectfont
+\setlist[itemize]{leftmargin=1.15em,itemsep=2pt,topsep=3pt,parsep=0pt,partopsep=0pt}
+\newcommand{\sectionheading}[1]{\vspace{6pt}{\large\bfseries #1}\par\vspace{2pt}\hrule\vspace{3.5pt}}
+{% elif content.classification in ["Embedded / Firmware", "FPGA / Digital Design"] %}
+\renewcommand{\baselinestretch}{1.14}\selectfont
+\setlist[itemize]{leftmargin=1.15em,itemsep=2.5pt,topsep=3.5pt,parsep=0pt,partopsep=0pt}
+\newcommand{\sectionheading}[1]{\vspace{6.5pt}{\large\bfseries #1}\par\vspace{2pt}\hrule\vspace{4pt}}
+{% else %}
+\renewcommand{\baselinestretch}{1.06}\selectfont
+\setlist[itemize]{leftmargin=1.15em,itemsep=1.5pt,topsep=2.5pt,parsep=0pt,partopsep=0pt}
+\newcommand{\sectionheading}[1]{\vspace{5.5pt}{\large\bfseries #1}\par\vspace{1.5pt}\hrule\vspace{3.5pt}}
+{% endif %}
+\newcommand{\resumelink}[2]{\href{#1}{#2}}
+\newcommand{\skillsrow}[2]{ {\bfseries #1:} #2\par}
+\newcommand{\educationentry}[5]{
+  {\bfseries #1}\hfill #4\par
+  #2\hfill #5\par
+  #3\par}
+\newcommand{\experienceentry}[4]{
+  {\bfseries #1}, #2\hfill #4\par
+  #3\par}
+\newcommand{\projectheading}[5]{
+  {\bfseries #1}
+  \ifx\relax#2\relax\else\space--- #2\fi
+  \ifx\relax#3\relax\else\hfill #3\fi
+  \ifx\relax#4\relax\else\space\resumelink{#4}{[GitHub]}\fi
+  \ifx\relax#5\relax\else\space\resumelink{#5}{[Live]}\fi\par}
+
+{% macro bullet_list(bullets) -%}
+\begin{itemize}
+{% for bullet in bullets %}\item {{ bullet|latex }}
+{% endfor %}\end{itemize}
+{%- endmacro %}
+
+{% macro render_summary() -%}
+{% if content.summary %}\sectionheading{Summary}
+{{ content.summary|latex }}
+{% endif %}
+{%- endmacro %}
+
+{% macro render_skills() -%}
+{% set groups = content.skill_categories|selectattr("items")|list %}
+{% if groups %}\sectionheading{Skills}
+{% for group in groups %}\skillsrow{ {{- group.name|latex -}} }{ {{- group["items"]|join(", ")|latex -}} }
+{% endfor %}{% endif %}
+{%- endmacro %}
+
+{% macro render_education() -%}
+{% if content.education %}\sectionheading{Education}
+\educationentry
+{ {{- content.education.institution|latex -}} }
+{ {{- content.education.degree|latex -}} }
+{ {{- content.education.location|latex -}} }
+{ {{- content.education.graduation|latex -}} }
+{ {%- if content.education.gpa -%}GPA: {{ content.education.gpa|latex }}{%- endif -%} }
+{% endif %}
+{%- endmacro %}
+
+{% macro render_experience() -%}
+{% if content.experience %}\sectionheading{Experience}
+{% for item in content.experience %}\experienceentry
+{ {{- item.title|latex -}} }
+{ {{- item.organization|latex -}} }
+{ {{- item.location|latex -}} }
+{ {{- item.dates|latex -}} }
+{{ bullet_list(item.bullets) }}
+{% endfor %}{% endif %}
+{%- endmacro %}
+
+{% macro render_projects() -%}
+{% if content.projects %}\sectionheading{Projects}
+{% for item in content.projects %}\projectheading
+{ {{- item.name|latex -}} }
+{ {{- item.technologies|join(", ")|latex -}} }
+{ {{- item.dates|latex -}} }
+{ {{- item.github_url|latex -}} }
+{ {{- item.live_url|latex -}} }
+{{ bullet_list(item.bullets) }}
+{% endfor %}{% endif %}
+{%- endmacro %}
+
+{% macro render_coursework() -%}
+{% if content.coursework %}\sectionheading{Relevant Coursework}
+{% for item in content.coursework %}{\bfseries {{ item.name|latex }}} --- {{ item.institution|latex }}{% if item.issued %}\hfill {{ item.issued|latex }}{% endif %}\par
+{% endfor %}
+{% endif %}
+{%- endmacro %}
+
+{% macro render_certifications() -%}
+{% if content.certifications %}\sectionheading{Certifications}
+{% for item in content.certifications %}{\bfseries {{ item.name|latex }}}{% if item.issuer %} --- {{ item.issuer|latex }}{% endif %}{% if item.date %}\hfill {{ item.date|latex }}{% endif %}{% if item.url %} \resumelink{ {{- item.url|latex -}} }{[Credential]}{% endif %}\par
+{% endfor %}{% endif %}
+{%- endmacro %}
+
+{% macro render_languages() -%}
+{% if content.languages %}\sectionheading{Languages}
+{% for language in content.languages %}{% if not loop.first %} \textbar{} {% endif %}{{ language|latex }}{% endfor %}
+{% endif %}
+{%- endmacro %}
+
+\begin{document}
+{\LARGE\bfseries {{ profile.full_name|latex }}}\hfill {{ profile.location|latex }}\par
+{{ profile.email|latex }}{% if profile.phone %} \textbar{} {{ profile.phone|latex }}{% endif %}{% if profile.linkedin_url %} \textbar{} \resumelink{ {{- profile.linkedin_url|latex -}} }{LinkedIn}{% endif %}{% if profile.github_url %} \textbar{} \resumelink{ {{- profile.github_url|latex -}} }{GitHub}{% endif %}\par
+{\bfseries {{ content.headline|latex }}}\par
+
+{% for section in content.section_order %}
+{% if section == "summary" %}{{ render_summary() }}
+{% elif section == "skills" %}{{ render_skills() }}
+{% elif section == "education" %}{{ render_education() }}
+{% elif section == "experience" %}{{ render_experience() }}
+{% elif section == "projects" %}{{ render_projects() }}
+{% elif section == "coursework" %}{{ render_coursework() }}
+{% elif section == "certifications" %}{{ render_certifications() }}
+{% elif section == "languages" %}{{ render_languages() }}
+{% endif %}
+{% endfor %}
+\end{document}

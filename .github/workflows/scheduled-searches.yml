@@ -1,0 +1,108 @@
+name: Internship Radar scheduled searches
+
+on:
+  schedule:
+    - cron: "15 */6 * * *"
+    - cron: "30 11 * * *"
+    - cron: "0 12 * * *"
+    - cron: "15 12 * * *"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: Search task to run
+        required: true
+        default: general
+        type: choice
+        options:
+          - high_priority
+          - general
+          - verification
+          - expire_deadlines
+
+permissions:
+  contents: read
+
+concurrency:
+  group: internship-radar-database-search
+  cancel-in-progress: false
+
+jobs:
+  search:
+    if: vars.AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SCHEDULER_ENABLED: "false"
+      SEARCH_SCHEDULER_ENABLED: "false"
+      EMAIL_ENABLED: ${{ vars.EMAIL_ENABLED || 'false' }}
+      EMAIL_PROVIDER: smtp
+      EMAIL_RECIPIENT: ${{ secrets.NOTIFICATION_EMAIL }}
+      NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
+      RESUME_EMAIL: ${{ secrets.RESUME_EMAIL }}
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_USE_TLS: "true"
+      SMTP_FROM_NAME: Internship Radar
+      SMTP_FROM_EMAIL: ${{ secrets.SMTP_FROM_EMAIL }}
+      EMAIL_PRIORITY_ALERTS: "true"
+      EMAIL_DAILY_DIGEST: "false"
+      EMAIL_DEADLINE_ALERTS: "false"
+      EMAIL_FOLLOW_UP_ALERTS: "false"
+      EMAIL_STATUS_CHANGE_ALERTS: "false"
+      USER_TIMEZONE: America/Mexico_City
+      PRIMARY_USER_ID: ${{ secrets.PRIMARY_USER_ID }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Prepare database
+        run: python -m app.jobs.prepare_database
+
+      - name: Select scheduled task
+        id: selected
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            task="${{ inputs.task }}"
+          else
+            case "${{ github.event.schedule }}" in
+              "15 */6 * * *") task="high_priority" ;;
+              "30 11 * * *") task="general" ;;
+              "0 12 * * *") task="verification" ;;
+              "15 12 * * *") task="expire_deadlines" ;;
+              *) echo "Unknown schedule"; exit 1 ;;
+            esac
+          fi
+          echo "task=$task" >> "$GITHUB_OUTPUT"
+
+      - name: Run high-priority search
+        if: steps.selected.outputs.task == 'high_priority'
+        run: python -m app.jobs.search_high_priority
+
+      - name: Run general search
+        if: steps.selected.outputs.task == 'general'
+        run: python -m app.jobs.search_general
+
+      - name: Verify active jobs
+        if: steps.selected.outputs.task == 'verification'
+        run: python -m app.jobs.verify_active_jobs
+
+      - name: Expire past deadlines
+        if: steps.selected.outputs.task == 'expire_deadlines'
+        run: python -m app.jobs.expire_deadlines
