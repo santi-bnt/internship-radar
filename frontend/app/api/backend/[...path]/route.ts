@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/auth";
-import { isAppAccessEnabled } from "@/lib/access";
+import { isAppAccessEnabled, isPublicDemoMode } from "@/lib/access";
 import { auditSecurityEvent } from "@/lib/audit";
 import { frameSecurityPolicy } from "@/lib/frame-policy";
 import { isAuthorizedEmail } from "@/lib/identity";
@@ -27,27 +27,37 @@ async function proxy(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
 ) {
-  if (!isAppAccessEnabled()) {
+  const publicDemo = isPublicDemoMode();
+  if (!isAppAccessEnabled() && !publicDemo) {
     return errorResponse("Internship Radar is temporarily unavailable.", 503);
   }
 
-  const session = await auth();
-  if (!session?.user) {
-    auditSecurityEvent("bff_authentication_required", {
-      resource: request.nextUrl.pathname,
-    });
-    return errorResponse("Authentication required.", 401);
-  }
-  if (
-    !session.user.primaryUserId ||
-    !session.user.email ||
-    !isAuthorizedEmail(session.user.email)
-  ) {
-    auditSecurityEvent("bff_access_rejected", {
-      email: session.user.email,
-      resource: request.nextUrl.pathname,
-    });
-    return errorResponse("Access denied.", 403);
+  let primaryUserId: string;
+  let authenticatedEmail: string;
+  if (publicDemo) {
+    primaryUserId = process.env.DEMO_USER_ID?.trim() || "public-demo";
+    authenticatedEmail = process.env.DEMO_USER_EMAIL?.trim() || "demo@example.com";
+  } else {
+    const session = await auth();
+    if (!session?.user) {
+      auditSecurityEvent("bff_authentication_required", {
+        resource: request.nextUrl.pathname,
+      });
+      return errorResponse("Authentication required.", 401);
+    }
+    if (
+      !session.user.primaryUserId ||
+      !session.user.email ||
+      !isAuthorizedEmail(session.user.email)
+    ) {
+      auditSecurityEvent("bff_access_rejected", {
+        email: session.user.email,
+        resource: request.nextUrl.pathname,
+      });
+      return errorResponse("Access denied.", 403);
+    }
+    primaryUserId = session.user.primaryUserId;
+    authenticatedEmail = session.user.email;
   }
 
   const internalSecret = process.env.INTERNAL_API_SECRET?.trim();
@@ -67,11 +77,11 @@ async function proxy(
   const backendPath = `/${path.join("/")}`;
   const rule = sensitiveOperation(backendPath, request.method);
   if (rule) {
-    const rateLimit = checkRateLimit(session.user.primaryUserId, rule);
+    const rateLimit = checkRateLimit(primaryUserId, rule);
     if (!rateLimit.allowed) {
       auditSecurityEvent("rate_limit_rejected", {
-        email: session.user.email,
-        primaryUserId: session.user.primaryUserId,
+        email: authenticatedEmail,
+        primaryUserId,
         resource: rule.key,
       });
       return errorResponse("Too many requests. Try again later.", 429, {
@@ -93,7 +103,7 @@ async function proxy(
   headers.set("x-internal-api-secret", internalSecret);
   headers.set(
     "x-user-identity",
-    createUserIdentityToken(session.user.primaryUserId, session.user.email),
+    createUserIdentityToken(primaryUserId, authenticatedEmail),
   );
 
   let response: Response;

@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { isAppAccessEnabled } from "@/lib/access";
+import { isAppAccessEnabled, isPublicDemoMode } from "@/lib/access";
 import { frameSecurityPolicy } from "@/lib/frame-policy";
 import {
   authorizedEmails,
@@ -22,6 +22,8 @@ beforeEach(() => {
   process.env.PRIMARY_USER_ID = "internship-radar-primary";
   process.env.USER_IDENTITY_SIGNING_SECRET = "unit-test-signing-secret";
   process.env.APP_ACCESS_ENABLED = "false";
+  process.env.PUBLIC_DEMO_MODE = "false";
+  process.env.NEXT_PUBLIC_PUBLIC_DEMO_MODE = "false";
 });
 
 afterEach(() => {
@@ -77,6 +79,12 @@ describe("server-side access and abuse controls", () => {
     expect(isAppAccessEnabled()).toBe(false);
     process.env.APP_ACCESS_ENABLED = "TRUE";
     expect(isAppAccessEnabled()).toBe(true);
+  });
+
+  it("enables public demo mode only through an explicit flag", () => {
+    expect(isPublicDemoMode()).toBe(false);
+    process.env.PUBLIC_DEMO_MODE = "TRUE";
+    expect(isPublicDemoMode()).toBe(true);
   });
 
   it("rate-limits by authenticated primary user", () => {

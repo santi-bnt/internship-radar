@@ -15,6 +15,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { switchGoogleAccount } from "@/app/auth-actions";
+import { isPublicDemoMode } from "@/lib/access";
 
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -28,6 +29,8 @@ const links = [
 
 export function Navigation() {
   const pathname = usePathname();
+  const publicDemo = isPublicDemoMode();
+  const visibleLinks = publicDemo ? links.filter(({ href }) => href !== "/account") : links;
   return (
     <aside className="sidebar">
       <Link href="/" className="brand" aria-label="Internship Radar dashboard">
@@ -38,7 +41,7 @@ export function Navigation() {
         </span>
       </Link>
       <nav aria-label="Primary navigation">
-        {links.map(({ href, label, icon: Icon }) => {
+        {visibleLinks.map(({ href, label, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
             <Link key={href} href={href} className={active ? "nav-link active" : "nav-link"}>
@@ -51,14 +54,16 @@ export function Navigation() {
       <div className="sidebar-foot">
         <span className="workspace-status">
           <span className="live-dot" />
-          Private workspace
+          {publicDemo ? "Public demo · fictional data" : "Private workspace"}
         </span>
-        <form action={switchGoogleAccount}>
-          <button className="sidebar-switch-account" type="submit">
-            <RefreshCw size={14} />
-            Switch Google account
-          </button>
-        </form>
+        {!publicDemo && (
+          <form action={switchGoogleAccount}>
+            <button className="sidebar-switch-account" type="submit">
+              <RefreshCw size={14} />
+              Switch Google account
+            </button>
+          </form>
+        )}
       </div>
     </aside>
   );

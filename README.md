@@ -9,6 +9,19 @@ The private production deployment is maintained separately. Forks and clones of
 this showcase start locked, use neutral example addresses, and do not execute
 scheduled automation until the owner explicitly configures it.
 
+## Public Demo Mode
+
+The showcase can be deployed without Google sign-in by setting both
+`PUBLIC_DEMO_MODE=true` and `NEXT_PUBLIC_PUBLIC_DEMO_MODE=true` in Vercel. The
+frontend then uses the fictional `public-demo` identity when signing requests to
+its dedicated backend. Do not point a public demo at a private production API or
+database.
+
+The included Render Blueprint creates `internship-radar-demo-api` with email and
+scheduled automation disabled. Its default SQLite database is intentionally
+ephemeral and contains only the fictional seed profile; use managed PostgreSQL
+when deploying a persistent private installation.
+
 Internship Radar is a private-first application for discovering, evaluating, and tracking internships in software engineering, backend systems, embedded software, firmware, FPGA/RTL, robotics, controls, and related fields.
 
 It separates technical fit from deterministic eligibility gates, explains every recommendation, monitors official and verified community sources, and generates job-specific, ATS-compatible resumes from verified profile data.
@@ -726,7 +739,8 @@ Never commit the Neon connection string. Internship Radar normalizes a standard
 
 1. Push the repository to GitHub.
 2. In Render, select **New > Blueprint** and choose the repository.
-3. Review `render.yaml`; it creates only `internship-radar-api` on the Free plan.
+3. Review `render.yaml`; this public showcase creates only
+   `internship-radar-demo-api` on the Free plan.
 4. Fill every variable marked `sync: false`.
 5. Paste the Neon pooled URL as `DATABASE_URL`.
 6. Use the generated Web Service URL for `FASTAPI_INTERNAL_URL` in Vercel.
@@ -735,8 +749,10 @@ Never commit the Neon connection string. Internship Radar normalizes a standard
 9. Open `https://YOUR-API.onrender.com/health`; the first free-tier request can
    take about a minute while the service wakes.
 
-Do not use SQLite on Render. The filesystem is ephemeral; resumes are compiled
-temporarily from LaTeX stored in PostgreSQL.
+Do not use SQLite for a persistent private deployment on Render because its
+filesystem is ephemeral. The public showcase intentionally accepts that reset
+behavior so it cannot accumulate personal data; persistent installations should
+compile resumes temporarily from LaTeX stored in PostgreSQL.
 
 ### Deploy the frontend on Vercel
 

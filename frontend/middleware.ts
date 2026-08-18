@@ -2,7 +2,7 @@ import type { NextFetchEvent } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/auth";
-import { isAppAccessEnabled } from "@/lib/access";
+import { isAppAccessEnabled, isPublicDemoMode } from "@/lib/access";
 import { auditSecurityEvent } from "@/lib/audit";
 import { frameSecurityPolicy } from "@/lib/frame-policy";
 import { isAuthorizedEmail } from "@/lib/identity";
@@ -59,6 +59,10 @@ const authenticatedMiddleware = auth((request) => {
 export default async function middleware(request: NextRequest, event: NextFetchEvent) {
   const pathname = request.nextUrl.pathname;
   if (isPublicPath(pathname)) return secureResponse(NextResponse.next(), pathname);
+
+  if (isPublicDemoMode()) {
+    return secureResponse(NextResponse.next(), pathname);
+  }
 
   if (!isAppAccessEnabled()) {
     if (pathname.startsWith("/api/")) {

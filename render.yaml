@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: internship-radar-api
+    name: internship-radar-demo-api
     runtime: docker
     plan: free
     dockerfilePath: ./backend/Dockerfile
@@ -8,8 +8,6 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
-      - key: DATABASE_URL
-        sync: false
       - key: ENVIRONMENT
         value: production
       - key: SCHEDULER_ENABLED
@@ -29,14 +27,18 @@ services:
       - key: USER_IDENTITY_SIGNING_SECRET
         sync: false
       - key: PRIMARY_USER_ID
-        sync: false
+        value: public-demo
       - key: AUTHORIZED_USER_EMAILS
-        sync: false
+        value: demo@example.com
       - key: APP_ACCESS_ENABLED
-        value: "false"
+        value: "true"
       - key: RESUME_EMAIL
-        sync: false
+        value: resume@example.com
       - key: NOTIFICATION_EMAIL
-        sync: false
+        value: notifications@example.com
       - key: EMAIL_RECIPIENT
-        sync: false
+        value: notifications@example.com
+      - key: EMAIL_ENABLED
+        value: "false"
+      - key: DEMO_FEED_ENABLED
+        value: "true"

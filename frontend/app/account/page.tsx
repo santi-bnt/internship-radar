@@ -3,9 +3,29 @@ import { redirect } from "next/navigation";
 
 import { signOutUser, switchGoogleAccount } from "@/app/auth-actions";
 import { auth } from "@/auth";
+import { isPublicDemoMode } from "@/lib/access";
 import { isAuthorizedEmail } from "@/lib/identity";
 
 export default async function AccountPage() {
+  if (isPublicDemoMode()) {
+    return (
+      <>
+        <header className="page-header">
+          <div>
+            <p className="eyebrow">Public showcase</p>
+            <h1>Demo account</h1>
+            <p className="page-subtitle">
+              This deployment uses a fictional candidate and contains no private account data.
+            </p>
+          </div>
+        </header>
+        <section className="panel account-panel">
+          <p>Authentication and personal email delivery are disabled in public demo mode.</p>
+        </section>
+      </>
+    );
+  }
+
   const session = await auth();
   if (!session?.user?.primaryUserId || !isAuthorizedEmail(session.user.email)) {
     redirect("/login");
