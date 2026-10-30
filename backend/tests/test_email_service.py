@@ -54,8 +54,6 @@ def config() -> Settings:
         email_enabled=True,
         email_provider="console",
         email_recipient="alerts@example.com",
-        email_deadline_alerts=True,
-        email_daily_digest=True,
         app_base_url="http://localhost:3000",
     )
 
@@ -63,11 +61,11 @@ def config() -> Settings:
 def make_profile(db: Session, **overrides) -> UserProfile:
     values = {
         "full_name": "Alex Rivera",
-        "degree": "B.S. Computer Engineering",
-        "university": "Example Institute of Technology",
-        "graduation_year": 2029,
-        "gpa": 3.7,
-        "gpa_scale": 4.0,
+        "degree": "B.S. Robotics",
+        "university": "Tecnológico de Monterrey",
+        "graduation_year": 2028,
+        "gpa": 93.05,
+        "gpa_scale": 100,
         "nationality": "Mexican",
         "email_notifications": True,
         "notification_email": "alerts@example.com",

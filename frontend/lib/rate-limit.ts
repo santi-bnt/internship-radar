@@ -10,13 +10,25 @@ type RateLimitRule = {
 };
 
 const buckets = new Map<string, RateLimitEntry>();
+// This is deliberately the same deploy-time variable as the FastAPI setting.
+// Configure RESUME_GENERATION_LIMIT_PER_HOUR in both services.
+const resumeGenerationLimit = Number.parseInt(
+  process.env.RESUME_GENERATION_LIMIT_PER_HOUR ?? "30",
+  10,
+) || 30;
 
 export function sensitiveOperation(pathname: string, method: string): RateLimitRule | null {
-  if (method === "POST" && pathname === "/api/jobs/search") {
+  if (
+    method === "POST" &&
+    (pathname === "/api/jobs/search" || pathname === "/api/search-runs")
+  ) {
     return { key: "search", limit: 5, windowMs: 60 * 60 * 1000 };
   }
-  if (method === "POST" && /\/api\/jobs\/\d+\/resume\/generate$/.test(pathname)) {
-    return { key: "resume", limit: 10, windowMs: 60 * 60 * 1000 };
+  if (method === "POST" && (/\/api\/jobs\/\d+\/resume\/generate$/.test(pathname) || /^\/api\/talent-communities\/[a-z0-9-]+\/resumes$/.test(pathname) || ["/api/resume-studio/resumes", "/api/kospie/resumes"].includes(pathname))) {
+    return { key: "resume", limit: resumeGenerationLimit, windowMs: 60 * 60 * 1000 };
+  }
+  if (method === "POST" && /^\/api\/talent-communities\/[a-z0-9-]+\/preview$/.test(pathname)) {
+    return { key: "resume-preview", limit: 60, windowMs: 60 * 60 * 1000 };
   }
   if (method === "POST" && pathname.startsWith("/api/notifications/test-")) {
     return { key: "test-email", limit: 5, windowMs: 60 * 60 * 1000 };

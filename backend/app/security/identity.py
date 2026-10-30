@@ -15,6 +15,26 @@ AUDIENCE = "internship-radar-api"
 PURPOSE = "user_request"
 MAX_TOKEN_LIFETIME_SECONDS = 120
 CLOCK_SKEW_SECONDS = 30
+JOSHUA_EMAIL = "secondary@example.com"
+JOSHUA_USER_ID = "00000000-0000-5000-8000-000000000001"
+ALONSO_EMAIL = "tertiary@example.com"
+# Stable UUID reserved for Taylor Morgan. This is an account
+# identity, never a display name and never an alias of another candidate.
+ALONSO_USER_ID = "00000000-0000-5000-8000-000000000002"
+
+def _configured_candidate_ids() -> dict[str, str]:
+    """Separate identities are explicit deployment configuration, never personal source data."""
+    try:
+        value = json.loads(settings.candidate_account_ids or "{}")
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {email.strip().lower(): owner.strip() for email, owner in value.items()
+            if isinstance(email, str) and "@" in email and isinstance(owner, str) and 0 < len(owner.strip()) <= 160}
+
+
+INDEPENDENT_CANDIDATE_IDS = _configured_candidate_ids()
 
 
 class IdentityValidationError(ValueError):
@@ -36,10 +56,15 @@ def normalize_email(email: Any) -> str:
 
 def is_authorized_email(email: Any) -> bool:
     normalized = normalize_email(email)
-    return bool(normalized) and normalized in settings.authorized_email_set
+    return bool(normalized) and (
+        normalized in INDEPENDENT_CANDIDATE_IDS or normalized in settings.authorized_email_set
+    )
 
 
 def resolve_primary_user(email: Any) -> str | None:
+    independent_user_id = INDEPENDENT_CANDIDATE_IDS.get(normalize_email(email))
+    if independent_user_id:
+        return independent_user_id
     primary_user_id = settings.primary_user_id.strip()
     return primary_user_id if primary_user_id and is_authorized_email(email) else None
 
@@ -76,6 +101,11 @@ def validate_user_identity(token: str | None, *, now: int | None = None) -> Auth
         )
     except (ValueError, UnicodeError) as exc:
         raise IdentityValidationError("Invalid identity signature.") from exc
+    canonical_signature = base64.urlsafe_b64encode(decoded_signature).rstrip(b"=").decode(
+        "ascii"
+    )
+    if not hmac.compare_digest(supplied_signature, canonical_signature):
+        raise IdentityValidationError("Invalid identity signature.")
     if not hmac.compare_digest(expected_signature, decoded_signature):
         raise IdentityValidationError("Invalid identity signature.")
 

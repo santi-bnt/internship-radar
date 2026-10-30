@@ -23,7 +23,7 @@ def upgrade() -> None:
             "degree_field",
             sa.String(240),
             nullable=False,
-            server_default="Computer Engineering",
+            server_default="Robotics and Digital Systems Engineering",
         ),
     )
     for column in profile_columns:

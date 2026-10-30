@@ -53,7 +53,7 @@ OFFICIAL_COMPANY_SOURCES = [
         "company": "Arm",
         "source_type": "official_careers",
         "source_identifier": "arm",
-        "source_url": "https://careers.arm.com/en/search-jobs?keywords=intern",
+        "source_url": "https://careers.arm.com/en/search-jobs?k=intern",
     },
     {
         "company": "Synopsys",
@@ -78,6 +78,24 @@ OFFICIAL_COMPANY_SOURCES = [
         "source_type": "workday",
         "source_identifier": "micron|External",
         "source_url": "https://micron.wd1.myworkdayjobs.com/External",
+    },
+    {
+        "company": "Solidigm",
+        "source_type": "smartrecruiters",
+        "source_identifier": "Solidigm",
+        "source_url": "https://jobs.smartrecruiters.com/Solidigm",
+    },
+    {
+        "company": "HP",
+        "source_type": "workday",
+        "source_identifier": "hp|ExternalCareerSite",
+        "source_url": "https://hp.wd5.myworkdayjobs.com/ExternalCareerSite",
+    },
+    {
+        "company": "Hewlett Packard Enterprise",
+        "source_type": "workday",
+        "source_identifier": "hpe|Jobsathpe",
+        "source_url": "https://hpe.wd5.myworkdayjobs.com/Jobsathpe",
     },
     {
         "company": "Marvell",
@@ -117,6 +135,18 @@ OFFICIAL_COMPANY_SOURCES = [
         "source_type": "greenhouse",
         "source_identifier": "cloudflare",
         "source_url": "https://boards.greenhouse.io/cloudflare",
+    },
+    {
+        "company": "Duolingo",
+        "source_type": "greenhouse",
+        "source_identifier": "duolingounirecruitment",
+        "source_url": "https://job-boards.greenhouse.io/duolingounirecruitment",
+    },
+    {
+        "company": "Roblox",
+        "source_type": "greenhouse",
+        "source_identifier": "roblox",
+        "source_url": "https://careers.roblox.com/jobs",
     },
     {
         "company": "Zoox",

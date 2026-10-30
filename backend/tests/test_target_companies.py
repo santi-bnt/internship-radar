@@ -13,6 +13,7 @@ from app.models import CompanySource, Job, TargetCompany
 from app.services.scoring import analyze_job
 from app.services.target_companies import (
     ALIASES,
+    VERIFIED_CAREER_URLS,
     normalize_company_name,
     priority_bonus,
     search_is_due,
@@ -194,3 +195,15 @@ def test_seed_keeps_general_discovery_optional():
         "Example New Startup",
         None,
     )
+
+
+def test_duolingo_and_roblox_are_available_in_target_company_filters():
+    records = {record["company_name"]: record for record in seed_records()}
+    assert records["Duolingo"]["category"] == "Cloud and data"
+    assert records["Roblox"]["category"] == "Cloud and data"
+    assert records["Duolingo"]["aliases"] == ["Duolingo"]
+    assert records["Roblox"]["aliases"] == ["Roblox", "Roblox Corporation"]
+    assert VERIFIED_CAREER_URLS["Duolingo"] == [
+        "https://job-boards.greenhouse.io/duolingounirecruitment"
+    ]
+    assert VERIFIED_CAREER_URLS["Roblox"] == ["https://careers.roblox.com/jobs"]

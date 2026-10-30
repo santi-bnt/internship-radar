@@ -1,10 +1,11 @@
 "use client";
 
-import { Mail, Save, Send, UserRound } from "lucide-react";
+import { BadgeCheck, Mail, Plus, Save, Send, Trash2, UserRound } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
-import type { EmailActionResult, Profile, ResumeProfile, VerifiedSkillGroup } from "@/lib/types";
+import ApplicationProfileSection from "@/components/ApplicationProfileSection";
+import type { EmailActionResult, LanguageCredential, Profile, ResumeProfile, VerifiedSkillGroup } from "@/lib/types";
 
 function linesToMap(text: string): Record<string, string> {
   return Object.fromEntries(
@@ -77,6 +78,34 @@ export default function ProfilePage() {
     setResumeProfile((current) => (current ? { ...current, [key]: value } : current));
   }
 
+  function updateLanguageCredential<K extends keyof LanguageCredential>(
+    index: number,
+    key: K,
+    value: LanguageCredential[K],
+  ) {
+    if (!resumeProfile) return;
+    const credentials = (resumeProfile.language_credentials_json ?? []).map((item, itemIndex) =>
+      itemIndex === index ? { ...item, [key]: value } : item,
+    );
+    updateResume("language_credentials_json", credentials);
+  }
+
+  function addLanguageCredential() {
+    if (!resumeProfile) return;
+    updateResume("language_credentials_json", [
+      ...(resumeProfile.language_credentials_json ?? []),
+      { language: "", proficiency: "", certificate: "", score: "", verified: false },
+    ]);
+  }
+
+  function removeLanguageCredential(index: number) {
+    if (!resumeProfile) return;
+    updateResume(
+      "language_credentials_json",
+      (resumeProfile.language_credentials_json ?? []).filter((_, itemIndex) => itemIndex !== index),
+    );
+  }
+
   async function saveResumeProfile() {
     if (!resumeProfile) return;
     setSaving(true);
@@ -140,6 +169,7 @@ export default function ProfilePage() {
       {message && <div className="notice" role="status">{message}</div>}
 
       <div className="profile-layout">
+        <ApplicationProfileSection />
         {resumeProfile && (
           <section className="form-section resume-profile-section">
             <div className="form-section-title"><UserRound size={19} /><h2>Resume Profile</h2></div>
@@ -169,6 +199,22 @@ export default function ProfilePage() {
               <label>GitHub URL<input value={resumeProfile.github_url} onChange={(event) => updateResume("github_url", event.target.value)} /></label>
               <label>Headline<input value={resumeProfile.headline} onChange={(event) => updateResume("headline", event.target.value)} /></label>
               <label>Languages<textarea rows={3} value={resumeProfile.languages_json.join("\n")} onChange={(event) => updateResume("languages_json", event.target.value.split("\n").map((value) => value.trim()).filter(Boolean))} /></label>
+              <div className="language-credentials-editor">
+                <div className="language-credentials-heading">
+                  <div><strong>Language profile and credentials</strong><small>Language level plus optional official exam evidence used by every resume target.</small></div>
+                  <button type="button" className="button secondary" onClick={addLanguageCredential}><Plus size={15} /> Add credential</button>
+                </div>
+                {(resumeProfile.language_credentials_json ?? []).map((credential, index) => (
+                  <div className="language-credential-row" key={`${credential.language}-${index}`}>
+                    <label>Language<input value={credential.language} onChange={(event) => updateLanguageCredential(index, "language", event.target.value)} /></label>
+                    <label>Proficiency<input value={credential.proficiency} onChange={(event) => updateLanguageCredential(index, "proficiency", event.target.value)} /></label>
+                    <label>Certificate<input value={credential.certificate} onChange={(event) => updateLanguageCredential(index, "certificate", event.target.value)} /></label>
+                    <label>Score<input value={credential.score} onChange={(event) => updateLanguageCredential(index, "score", event.target.value)} /></label>
+                    <label className="language-verified"><input type="checkbox" checked={credential.verified} onChange={(event) => updateLanguageCredential(index, "verified", event.target.checked)} /><BadgeCheck size={16} /> Verified fact</label>
+                    <button type="button" className="icon-button" aria-label={`Remove ${credential.language || "language"} credential`} onClick={() => removeLanguageCredential(index)}><Trash2 size={16} /></button>
+                  </div>
+                ))}
+              </div>
               <label>Verified summary<textarea rows={5} value={resumeProfile.summary} onChange={(event) => updateResume("summary", event.target.value)} /></label>
               <label>Explicit verified skill records<textarea rows={5} value={resumeProfile.skills_json.join(", ")} onChange={(event) => updateResume("skills_json", event.target.value.split(",").map((value) => value.trim()).filter(Boolean))} /></label>
               <label>Coursework<textarea rows={6} value={resumeProfile.coursework_json.map((value) => typeof value === "string" ? value : JSON.stringify(value)).join("\n")} onChange={(event) => updateResume("coursework_json", parseCourseworkLines(event.target.value))} /></label>
@@ -179,11 +225,19 @@ export default function ProfilePage() {
         )}
         <section className="form-section">
           <div className="form-section-title"><UserRound size={19} /><h2>Candidate</h2></div>
+          {profile.profile_warnings.length > 0 && (
+            <div className="warning-banner" role="alert">
+              <strong>Profile information needs confirmation</strong>
+              {profile.profile_warnings.map((warning) => <p key={warning}>{warning}</p>)}
+            </div>
+          )}
           <div className="form-grid two">
             <label>Full name<input value={profile.full_name} onChange={(e) => update("full_name", e.target.value)} /></label>
+            <label>Workspace display name<input value={profile.display_name} onChange={(e) => update("display_name", e.target.value)} /></label>
             <label>Nationality<input value={profile.nationality} onChange={(e) => update("nationality", e.target.value)} /></label>
             <label>Citizenship country<input value={profile.citizenship_country} onChange={(e) => update("citizenship_country", e.target.value)} /></label>
-            <label>Degree<input value={profile.degree} onChange={(e) => update("degree", e.target.value)} /></label>
+            <label>Official degree/program name<input value={profile.official_degree_name ?? profile.degree} onChange={(e) => { update("official_degree_name", e.target.value || null); update("degree", e.target.value); }} /></label>
+            <label>Current semester<input type="number" value={profile.current_semester ?? ""} onChange={(e) => update("current_semester", e.target.value ? Number(e.target.value) : null)} /></label>
             <label>University<input value={profile.university} onChange={(e) => update("university", e.target.value)} /></label>
             <label>Graduation year<input type="number" value={profile.graduation_year} onChange={(e) => update("graduation_year", Number(e.target.value))} /></label>
             <label>Graduation date<input type="date" value={profile.graduation_date ?? ""} onChange={(e) => update("graduation_date", e.target.value || null)} /></label>
@@ -208,7 +262,7 @@ export default function ProfilePage() {
             <label>Expected graduation date<input type="date" value={profile.expected_graduation_date ?? ""} onChange={(e) => update("expected_graduation_date", e.target.value || null)} /></label>
             <label>Canonical degree field<input value={profile.degree_field} onChange={(e) => update("degree_field", e.target.value)} /></label>
             <label>GPA<input type="number" step="0.01" value={profile.gpa} onChange={(e) => update("gpa", Number(e.target.value))} /></label>
-            <label>GPA scale<input type="number" value={profile.gpa_scale} onChange={(e) => update("gpa_scale", Number(e.target.value))} /></label>
+            <label>GPA scale<input type="number" value={profile.gpa_scale ?? ""} onChange={(e) => update("gpa_scale", e.target.value ? Number(e.target.value) : null)} /></label>
           </div>
           <label className="checkbox-row">
             <input type="checkbox" checked={profile.willing_to_relocate} onChange={(e) => update("willing_to_relocate", e.target.checked)} />

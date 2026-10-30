@@ -2,18 +2,20 @@
 
 import {
   ArrowLeft,
+  Archive,
   BadgeCheck,
   CalendarDays,
   ExternalLink,
   FileCheck2,
   MapPin,
   RefreshCw,
+  RotateCcw,
   Save,
   SearchCheck,
   Siren,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { ScoreBar } from "@/components/ScoreBar";
@@ -21,7 +23,11 @@ import { JobDescription } from "@/components/JobDescription";
 import { StatusBadge } from "@/components/StatusBadge";
 import { EligibilityBadge } from "@/components/EligibilityBadge";
 import RecommendedResumeSection from "@/components/RecommendedResumeSection";
+import ApplyAssistantButton from "@/components/ApplyAssistantButton";
 import { api, formatDate } from "@/lib/api";
+import { jobApplicationUrl } from "@/lib/apply-assistant";
+import { displayedJobAction } from "@/lib/job-action";
+import { jobListPathWithNotice, jobListReturnPath } from "@/lib/job-navigation";
 import type { Job, JobLifecycleAction } from "@/lib/types";
 
 function isDemoJob(job: Job): boolean {
@@ -33,6 +39,11 @@ function isDemoJob(job: Job): boolean {
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = jobListReturnPath(searchParams.toString());
+  const importResult = searchParams.get("import_result");
+  const importVerified = searchParams.get("import_verified") === "true";
+  const importWarning = searchParams.get("import_warning");
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -81,6 +92,20 @@ export default function JobDetailPage() {
     }
   }
 
+  async function recheckJob() {
+    if (!job) return;
+    setSaving(true);
+    setError("");
+    try {
+      setJob(await api<Job>(`/api/jobs/${job.id}/recheck`, { method: "POST" }));
+      setSaved("Official posting and application availability rechecked.");
+    } catch (recheckError) {
+      setError(recheckError instanceof Error ? recheckError.message : "Could not recheck this job.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveApplication() {
     if (!job || isDemoJob(job)) return;
     setSaving(true);
@@ -101,7 +126,7 @@ export default function JobDetailPage() {
             }),
           });
         }
-        router.push("/jobs?notice=applied");
+        router.push(jobListPathWithNotice(returnTo, "applied"));
       } else {
         await api("/api/applications", {
           method: "POST",
@@ -136,12 +161,11 @@ export default function JobDetailPage() {
   }
 
   async function undoApplied() {
-    if (!job || !undoStatus) return;
+    if (!job || job.status !== "applied") return;
     setSaving(true);
     try {
       const result = await api<JobLifecycleAction>(`/api/jobs/${job.id}/undo-applied`, {
         method: "POST",
-        body: JSON.stringify({ previous_status: undoStatus }),
       });
       setJob(result.job);
       setUndoStatus(null);
@@ -153,27 +177,57 @@ export default function JobDetailPage() {
     }
   }
 
+  async function changeArchive(action: "archive" | "restore") {
+    if (!job) return;
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await api<Job>(`/api/jobs/${job.id}/${action}`, { method: "POST" });
+      setJob(updated);
+      setSaved(action === "archive" ? "Job archived. You can restore it from Archived jobs." : "Job restored.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : `Could not ${action} job.`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeForceApply(enabled: boolean) {
+    if (!job) return;
+    setSaving(true);
+    setError("");
+    try {
+      setJob(await api<Job>(`/api/jobs/${job.id}/force-apply-now`, {
+        method: enabled ? "POST" : "DELETE",
+      }));
+      setSaved(enabled
+        ? "Manual Force Apply Now enabled. Eligibility analysis and blockers are unchanged."
+        : "Manual Force Apply Now removed. The normal recommendation is restored.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update Force Apply Now.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (error && !job) return <div className="notice error">{error}</div>;
   if (!job) return <div className="empty-state">Loading job analysis…</div>;
 
   const analysis = job.analysis;
   const demoJob = isDemoJob(job);
-  const verifiedOfficialApplication = Boolean(
-    job.official_apply_url
-    && job.official_status === "open"
-    && job.verification_status === "verified",
-  );
-  const primaryApplicationUrl = verifiedOfficialApplication && job.official_apply_url
-    ? job.official_apply_url
-    : job.original_source_url || job.apply_url;
+  const applicationUrl = jobApplicationUrl(job);
+  const postingUrl = applicationUrl || job.posting_url || job.original_source_url;
   return (
     <>
-      <Link href="/jobs" className="back-link"><ArrowLeft size={16} /> Back to jobs</Link>
+      <Link href={returnTo} className="back-link"><ArrowLeft size={16} /> Back to jobs</Link>
       <header className="detail-header">
         <div>
           <div className="detail-status">
-            <StatusBadge value={analysis?.recommendation ?? "Review"} />
+            <StatusBadge value={displayedJobAction(job)} />
             {analysis && <EligibilityBadge value={analysis.eligibility_status} />}
+            {job.force_apply_now_available && (
+              <span className="priority-pill">Apply Now · manual override</span>
+            )}
             <span>{job.source_name}</span>
             <StatusBadge value={job.status.replaceAll("_", " ")} />
             {job.is_priority_alert && <span className="priority-pill"><Siren size={12} />Priority</span>}
@@ -188,6 +242,7 @@ export default function JobDetailPage() {
             <span>{job.remote_type}</span>
             <span>Remote scope: {job.remote_scope.replaceAll("_", " ")}</span>
             <span>Can work from Mexico: {job.can_work_from_mexico}</span>
+            <span>Last verified: {job.last_verified_at ? formatDate(job.last_verified_at) : "Not yet"}</span>
             {job.duration && <span>{job.duration}</span>}
           </div>
         </div>
@@ -195,27 +250,59 @@ export default function JobDetailPage() {
           <button className="button secondary" onClick={analyzeAgain} disabled={saving}>
             <RefreshCw size={16} /> Reanalyze
           </button>
+          {(job.status === "active" || job.status === "saved") && (
+            <button className="button secondary" onClick={() => void recheckJob()} disabled={saving}>
+              <SearchCheck size={16} /> Recheck job
+            </button>
+          )}
           {(job.status === "active" || job.status === "saved") && !demoJob && (
             <button className="button primary" onClick={() => void markApplied()} disabled={saving}>
               <FileCheck2 size={16} /> Mark as Applied
             </button>
           )}
-          {!demoJob && verifiedOfficialApplication && job.original_source_url && job.original_source_url !== job.official_apply_url && (
-            <a className="button secondary" href={job.original_source_url} target="_blank" rel="noreferrer">
-              Discovery source <ExternalLink size={16} />
-            </a>
+          {job.force_apply_now_permitted && !job.force_apply_now && (
+            <button className="button secondary" onClick={() => void changeForceApply(true)} disabled={saving}>
+              <Siren size={16} /> Force Apply Now
+            </button>
           )}
+          {job.force_apply_now && (
+            <button className="button secondary" onClick={() => void changeForceApply(false)} disabled={saving}>
+              <RotateCcw size={16} /> Remove Force Apply
+            </button>
+          )}
+          <ApplyAssistantButton job={job} disabled={demoJob || saving} forceApplyNow={job.force_apply_now_available} />
+          {!demoJob && postingUrl && <a className="button secondary" href={postingUrl} target="_blank" rel="noreferrer">Open Job <ExternalLink size={16} /></a>}
           {demoJob ? (
             <button className="button primary" disabled title="This fixture has no real application page">
               Demo listing
             </button>
           ) : (
-            <a className="button primary" href={primaryApplicationUrl} target="_blank" rel="noreferrer">
-              {verifiedOfficialApplication ? "Open official application" : "Open discovery listing"} <ExternalLink size={16} />
-            </a>
+            applicationUrl ? <a className="button primary" href={applicationUrl} target="_blank" rel="noreferrer">Apply <ExternalLink size={16} /></a> : null
           )}
+          {job.status === "applied" && job.application_status === "Applied" && (
+            <button className="button secondary" onClick={() => void undoApplied()} disabled={saving}>
+              <RotateCcw size={16} /> Remove Applied
+            </button>
+          )}
+          {job.status === "archived" || job.status === "not_interested" ? (
+            <button className="button secondary" onClick={() => void changeArchive("restore")} disabled={saving}>
+              <RotateCcw size={16} /> Restore job
+            </button>
+          ) : job.status !== "expired" ? (
+            <button className="button secondary" onClick={() => void changeArchive("archive")} disabled={saving}>
+              <Archive size={16} /> Archive job
+            </button>
+          ) : null}
         </div>
       </header>
+
+      {(importResult === "created" || importResult === "reused") && (
+        <div className="notice success" role="status">
+          <strong>{importResult === "created" ? "Job imported successfully." : "Existing job found and reused."}</strong>
+          {!importVerified && " Some posting details could not be verified; review the analysis before applying."}
+        </div>
+      )}
+      {importWarning && <div className="notice error" role="status">{importWarning}</div>}
 
       {demoJob && (
         <div className="notice">
@@ -223,8 +310,12 @@ export default function JobDetailPage() {
         </div>
       )}
       {error && <div className="notice error">{error}</div>}
+      {!demoJob && !applicationUrl && <div className="notice"><strong>Application link unavailable.</strong> The official job page remains available. Diagnostic: {job.application_url_diagnostic || "APPLICATION_URL_NOT_FOUND"}.</div>}
       {analysis?.eligibility_status === "NOT_ELIGIBLE" && (
         <div className="notice error"><strong>Not eligible:</strong> {analysis.blocker_reasons[0] ?? "A hard work-authorization requirement is not met."}</div>
+      )}
+      {job.force_apply_now_available && (
+        <div className="notice success"><strong>Apply Now — manual override enabled.</strong> The normal eligibility analysis, score, and blockers above have not been changed.</div>
       )}
       {saved && (
         <div className="notice success">
@@ -312,7 +403,7 @@ export default function JobDetailPage() {
             <dl className="verification-list">
               <div><dt>Official status</dt><dd>{job.official_status}</dd></div>
               <div><dt>Verification</dt><dd>{job.verification_status.replaceAll("_", " ")}</dd></div>
-              <div><dt>Last checked</dt><dd>{formatDate(job.last_verified_at)}</dd></div>
+              <div><dt>Last verified</dt><dd>{formatDate(job.last_verified_at)}</dd></div>
               <div><dt>Method</dt><dd>{job.verification_method.replaceAll("_", " ")}</dd></div>
               <div><dt>Physical work country</dt><dd>{job.physical_work_country_required}</dd></div>
               <div><dt>Remote scope</dt><dd>{job.remote_scope.replaceAll("_", " ")}</dd></div>
@@ -411,7 +502,12 @@ export default function JobDetailPage() {
           </section>
         </aside>
       </div>
-      {analysis?.eligibility_status !== "NOT_ELIGIBLE" && <RecommendedResumeSection job={job} />}
+      {analysis?.eligibility_status === "NOT_ELIGIBLE" && (
+        <div className="notice">
+          You can still prepare a tailored CV. Generating a resume does not confirm eligibility or remove the requirements shown above.
+        </div>
+      )}
+      <RecommendedResumeSection job={job} />
     </>
   );
 }

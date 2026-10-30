@@ -46,7 +46,8 @@ class OracleRecruitingAdapter(JobSourceAdapter):
             )
             jobs: dict[str, dict[str, Any]] = {}
             errors: list[str] = []
-            for keyword in self.SEARCH_KEYWORDS:
+            keywords = self.search_terms(self.SEARCH_KEYWORDS)
+            for keyword in keywords:
                 try:
                     response = await client.get(
                         endpoint,

@@ -25,8 +25,13 @@ ADAPTERS: dict[str, type[JobSourceAdapter]] = {
 }
 
 
-def create_adapter(source) -> JobSourceAdapter:
+def create_adapter(source, search_criteria: dict | None = None) -> JobSourceAdapter:
     adapter_class = ADAPTERS.get(source.source_type)
     if not adapter_class:
         raise ValueError(f"No fetch adapter is available for source type '{source.source_type}'")
-    return adapter_class(source.company, source.source_identifier, source.source_url)
+    return adapter_class(
+        source.company,
+        source.source_identifier,
+        source.source_url,
+        search_criteria=search_criteria,
+    )

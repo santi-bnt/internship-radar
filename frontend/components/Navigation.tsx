@@ -5,6 +5,7 @@ import {
   Building2,
   LayoutDashboard,
   Radar,
+  FileText,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -21,6 +22,9 @@ const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
   { href: "/applications", label: "Applications", icon: Send },
+  { href: "/resume-studio", label: "Resume Studio", icon: FileText },
+  { href: "/talent-communities", label: "Talent Communities", icon: Building2 },
+  { href: "/kospie", label: "KOSPIE CV", icon: FileText },
   { href: "/profile", label: "Profile", icon: UserRound },
   { href: "/sources", label: "Sources", icon: Building2 },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -29,8 +33,7 @@ const links = [
 
 export function Navigation() {
   const pathname = usePathname();
-  const publicDemo = isPublicDemoMode();
-  const visibleLinks = publicDemo ? links.filter(({ href }) => href !== "/account") : links;
+  const demo = isPublicDemoMode();
   return (
     <aside className="sidebar">
       <Link href="/" className="brand" aria-label="Internship Radar dashboard">
@@ -41,7 +44,7 @@ export function Navigation() {
         </span>
       </Link>
       <nav aria-label="Primary navigation">
-        {visibleLinks.map(({ href, label, icon: Icon }) => {
+        {links.map(({ href, label, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
             <Link key={href} href={href} className={active ? "nav-link active" : "nav-link"}>
@@ -54,16 +57,14 @@ export function Navigation() {
       <div className="sidebar-foot">
         <span className="workspace-status">
           <span className="live-dot" />
-          {publicDemo ? "Public demo · fictional data" : "Private workspace"}
+          {demo ? "Read-only demo · fictional data" : "Private workspace"}
         </span>
-        {!publicDemo && (
-          <form action={switchGoogleAccount}>
-            <button className="sidebar-switch-account" type="submit">
-              <RefreshCw size={14} />
-              Switch Google account
-            </button>
-          </form>
-        )}
+        {!demo && <form action={switchGoogleAccount}>
+          <button className="sidebar-switch-account" type="submit">
+            <RefreshCw size={14} />
+            Switch Google account
+          </button>
+        </form>}
       </div>
     </aside>
   );

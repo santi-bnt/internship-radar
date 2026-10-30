@@ -85,6 +85,29 @@ SKILL_CATEGORY: dict[str, str] = {
 }
 
 ROLE_SKILL_PRIORITIES: dict[str, tuple[str, ...]] = {
+    "Solutions / API Integration": (
+        "Python", "REST APIs", "FastAPI", "Flask", "TypeScript", "Next.js",
+        "PostgreSQL", "MySQL", "SQL", "Git", "Linux", "Software Debugging",
+        "Software Validation", "C++", "C", "Hardware/Software Integration",
+    ),
+    "Hardware / Systems Integration": (
+        "FPGA", "Intel MAX 10", "Verilog", "SystemVerilog", "Digital Logic",
+        "Hardware/Software Integration", "Embedded Systems", "Microcontrollers",
+        "UART", "PWM", "GPIO", "Hardware Debugging", "Testing", "C", "C++", "Git",
+    ),
+    "KOSPIE / Germany Engineering": (
+        "C", "C++", "Python", "Embedded Systems", "Microcontrollers", "FreeRTOS",
+        "Robotics", "Controls", "Hardware/Software Integration", "FPGA", "Verilog",
+        "SystemVerilog", "Digital Logic", "Digital Design", "UART", "I2C", "SPI",
+        "PWM", "Computer Vision", "Electronics", "Hardware Debugging", "Testing",
+        "Linux", "Git", "GitHub",
+    ),
+    "Robotics Research": (
+        "C", "C++", "Python", "Robotics", "Controls", "Embedded Systems",
+        "Microcontrollers", "FreeRTOS", "ESP32", "FRDM-KL25Z", "Raspberry Pi",
+        "Hardware/Software Integration", "Hardware Debugging", "Computer Vision",
+        "OpenCV", "UART", "I2C", "SPI", "PWM", "Testing", "Linux", "Git", "GitHub",
+    ),
     "Embedded / Firmware": (
         "C", "C++", "FreeRTOS", "Embedded Systems", "Linux", "Microcontrollers",
         "UART", "GPIO", "ADC", "PWM", "Interrupts", "Hardware Debugging",
@@ -172,40 +195,65 @@ def skill_category(skill: str) -> str:
 
 def build_verified_skill_registry(profile: Any) -> dict[str, dict[str, Any]]:
     registry: dict[str, dict[str, Any]] = {}
+    def field(name: str) -> Any:
+        return profile.get(name, []) if isinstance(profile, dict) else getattr(profile, name, [])
 
-    def add(raw_skill: Any, evidence: str, evidence_type: str) -> None:
+    def add(raw_skill: Any, evidence: str, evidence_type: str, project_id: Any = None) -> None:
         skill = canonicalize_skill(raw_skill)
         if not skill or _key(skill) in IGNORED_EVIDENCE_LABELS:
             return
         item = registry.setdefault(skill, {
             "skill": skill,
+            "canonical_id": _key(skill),
+            "aliases": list(SKILL_ALIASES.get(skill, ())),
+            "verified": True,
             "category": skill_category(skill),
             "evidence": [],
             "evidence_types": [],
+            "evidence_project_ids": [],
         })
         if evidence not in item["evidence"]:
             item["evidence"].append(evidence)
         if evidence_type not in item["evidence_types"]:
             item["evidence_types"].append(evidence_type)
+        if project_id is not None and project_id not in item["evidence_project_ids"]:
+            item["evidence_project_ids"].append(project_id)
 
-    for skill in getattr(profile, "skills_json", []) or []:
+    for skill in field("skills_json") or []:
         add(skill, "Verified skill record", "profile")
 
-    for project in getattr(profile, "projects_json", []) or []:
+    for project in field("projects_json") or []:
         if not isinstance(project, dict) or project.get("is_resume_eligible", True) is not True:
             continue
         name = _clean(project.get("name") or project.get("title") or "Verified project")
         for skill in project.get("technologies", []) or []:
-            add(skill, f"Project: {name}", "project")
+            add(skill, f"Project: {name}", "project", project.get("id") or name)
 
-    for course in getattr(profile, "coursework_json", []) or []:
+    for repository in field("github_evidence_json") or []:
+        if not isinstance(repository, dict) or str(repository.get("status", "")).upper() != "VERIFIED":
+            continue
+        name = _clean(repository.get("name") or "Verified GitHub repository")
+        for skill in repository.get("technologies", []) or []:
+            add(skill, f"GitHub evidence: {name}", "github", repository.get("repository_url") or name)
+
+    for course in field("coursework_json") or []:
         if not isinstance(course, dict):
             continue
         name = _clean(course.get("name") or "Verified course")
         for skill in course.get("areas", []) or []:
             add(skill, f"Course: {name}", "course")
 
-    for experience in getattr(profile, "experience_json", []) or []:
+    for certification in field("certifications_json") or []:
+        if not isinstance(certification, dict) or certification.get("verified") is not True:
+            continue
+        # A credential only supports the deliberately recorded topics.  Do
+        # not infer a database product, administration, or data-engineering
+        # claim merely from the name of a course.
+        name = _clean(certification.get("name") or certification.get("title") or "Verified certification")
+        for skill in certification.get("skills", []) or []:
+            add(skill, f"Certification: {name}", "certification")
+
+    for experience in field("experience_json") or []:
         if not isinstance(experience, dict):
             continue
         name = _clean(experience.get("organization") or experience.get("title") or "Experience")
@@ -270,11 +318,29 @@ def _description_segments(description: str) -> tuple[str, str, str]:
 
 def _display_category(skill: str, classification: str) -> str:
     base = skill_category(skill)
-    if classification == "Embedded / Firmware":
+    if classification == "Solutions / API Integration":
+        if base == "Languages":
+            return "Programming"
+        if skill in {"PostgreSQL", "MySQL", "SQL", "SQLAlchemy"}:
+            return "Data"
+        if base == "Backend / Web":
+            return "Web & APIs"
+        if base in {"Debug & Validation", "Development", "Tools"} or skill == "Linux":
+            return "Software Engineering"
+        return "Embedded Systems"
+    if classification == "Hardware / Systems Integration":
         return {
-            "Languages": "Languages", "Embedded / Systems": "Systems",
-            "Hardware": "Hardware", "Debug & Validation": "Debug & Validation",
-        }.get(base, "Development")
+            "Languages": "Programming", "Hardware": "Digital Systems & Hardware",
+            "Embedded / Systems": "Embedded Systems", "Debug & Validation": "Debug & Validation",
+        }.get(base, "Tools")
+    if classification == "Embedded / Firmware":
+        if base == "Languages":
+            return "Programming"
+        if skill in {"FreeRTOS", "Tasks", "Queues", "Mutexes", "Semaphores", "Interrupts", "ISRs", "Timers", "Concurrent Programming", "Multithreaded Programming"}:
+            return "RTOS"
+        if skill in {"UART", "SPI", "I2C", "GPIO", "PWM", "ADC"}:
+            return "Protocols"
+        return "Embedded Systems"
     if classification == "FPGA / Digital Design":
         return {
             "Languages": "Languages", "Hardware": "Hardware",
@@ -297,11 +363,12 @@ def _display_category(skill: str, classification: str) -> str:
             "Languages": "Languages", "Backend / Web": "Backend / Web",
             "Development": "Development", "Debug & Validation": "Development",
         }.get(base, "Tools")
-    if classification == "Robotics / Controls":
+    if classification in {"Robotics / Controls", "Talent Community", "KOSPIE / Germany Engineering"}:
         return {
-            "Languages": "Languages", "Embedded / Systems": "Systems",
-            "Hardware": "Hardware",
-        }.get(base, "Tools")
+            "Languages": "Programming", "Embedded / Systems": "Embedded Systems",
+            "Hardware": "Digital Systems & Hardware", "Debug & Validation": "Engineering Tools",
+            "Development": "Algorithms & Software", "Tools": "Engineering Tools",
+        }.get(base, "Engineering Tools")
     return {
         "Languages": "Languages", "Development": "Development",
         "Debug & Validation": "Development", "Embedded / Systems": "Tools",
@@ -329,6 +396,20 @@ def select_job_skills(
     ))
     all_job_text = " ".join((required_text, preferred_text, contextual_text))
     priorities = ROLE_SKILL_PRIORITIES.get(classification, ())
+    if classification == "Talent Community":
+        area_roles = {
+            "Robotics": "Robotics / Controls", "Controls": "Robotics / Controls",
+            "Autonomous Systems": "Robotics Research",
+            "Embedded Systems": "Embedded / Firmware",
+            "FPGA / Digital Systems": "FPGA / Digital Design",
+            "Software Engineering": "Software Engineering",
+            "Hardware Software Integration": "Embedded / Firmware",
+        }
+        priorities = tuple(dict.fromkeys(skill for area in getattr(job, "target_role_categories", [])
+                                        for skill in ROLE_SKILL_PRIORITIES.get(area_roles.get(area, ""), ())))
+        # Company targeting is context, never a fabricated requisition requirement.
+        required_text = preferred_text = ""
+        contextual_text = all_job_text = description
     priority_index = {skill: index for index, skill in enumerate(priorities)}
     requested = {
         canonicalize_skill(skill) for skill in (model_requested or [])
@@ -374,7 +455,7 @@ def select_job_skills(
             score += 12
             reasons.append("Demonstrated across multiple projects")
         if skill in priority_index:
-            score += 8
+            score += max(8, 42 - priority_index[skill]) if classification == "Talent Community" else 8
             reasons.append(f"Relevant to {classification}")
         if "course" in item["evidence_types"]:
             score += 5
@@ -387,6 +468,11 @@ def select_job_skills(
             "skill": skill,
             "category": _display_category(skill, classification),
             "match_type": match_type,
+            "match_kind": (
+                "EXACT" if _occurrences(skill, all_job_text) and re.search(
+                    rf"(?<![a-z0-9+#]){re.escape(skill.lower())}(?![a-z0-9+#])", all_job_text.lower()
+                ) else "ALIAS" if total_hits else "PARTIAL"
+            ),
             "score": score,
             "reason": "; ".join(dict.fromkeys(reasons)) or "Verified supporting skill",
             "evidence": item["evidence"],
@@ -457,7 +543,7 @@ def select_job_skills(
         if item["category"] not in category_order:
             category_order.append(item["category"])
     categories = [
-        {"name": category, "items": groups[category]}
+        {"name": category, "items": groups[category][:8]}
         for category in category_order[:4]
     ]
     selected_skills = [skill for group in categories for skill in group["items"]]

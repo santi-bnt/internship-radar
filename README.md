@@ -1,30 +1,21 @@
 # Internship Radar
 
-> **Public showcase:** this repository contains a fictional demo candidate,
-> placeholder contact details, and example project records. It contains no
-> production database, deployment secrets, email credentials, generated resumes,
-> or real candidate profile data.
+> Public showcase and reusable source code. Candidate data is fictional. This release contains no production database, personal CVs, account credentials, real certification identifiers or private candidate provisioning data.
 
-The private production deployment is maintained separately. Forks and clones of
-this showcase start locked, use neutral example addresses, and do not execute
-scheduled automation until the owner explicitly configures it.
+The public demo is read-only and must use a separate backend/database. Set `PUBLIC_DEMO_MODE=true` and `NEXT_PUBLIC_PUBLIC_DEMO_MODE=true` only for that isolated demo. Hosted demo visitors cannot edit profiles, run discovery/imports, create application sessions or generate CVs. Private installations can enable those features after configuring their own accounts, authentication and secrets. Scheduled workflows require explicit `ENABLE_PUBLIC_AUTOMATION=true` repository configuration.
 
-## Public Demo Mode
+## October 2026 source update
 
-The showcase can be deployed without Google sign-in by setting both
-`PUBLIC_DEMO_MODE=true` and `NEXT_PUBLIC_PUBLIC_DEMO_MODE=true` in Vercel. The
-frontend then uses the fictional `public-demo` identity when signing requests to
-its dedicated backend. Do not point a public demo at a private production API or
-database.
+- Job-specific TailoringPlan, candidate evidence mapping, role-aware project/skill decisions and immutable resume versions.
+- Resume Studio, Best Resume, program CVs, verified language/certification evidence and generation queue/reuse controls.
+- Add Job by URL with official-source enrichment, deduplication, SSRF protection and candidate-specific state.
+- Dashboard filters/sorting/navigation preservation, archive/restore, reversible Applied tracking and freshness revalidation.
+- More official employer adapters and conservative source health/retry scheduling.
+- User-reviewed local application assistant with split-screen controls and combined HTML + screenshot vision through loopback Ollama. Docker runs the local model; Chromium remains visible on the desktop. See [local setup](local-agent/README.md).
 
-The included Render Blueprint creates `internship-radar-demo-api` with email and
-scheduled automation disabled. Its default SQLite database is intentionally
-ephemeral and contains only the fictional seed profile; use managed PostgreSQL
-when deploying a persistent private installation.
+Start local vision on Windows by double-clicking `start-local-assistant.cmd`. Images and form analysis stay on the device; hosted profile/CV services remain part of your configured Radar installation. Missing evidence, legal questions, assessments and final submission require personal review.
 
-Internship Radar is a private-first application for discovering, evaluating, and tracking internships in software engineering, backend systems, embedded software, firmware, FPGA/RTL, robotics, controls, and related fields.
-
-It separates technical fit from deterministic eligibility gates, explains every recommendation, monitors official and verified community sources, and generates job-specific, ATS-compatible resumes from verified profile data.
+Private candidate bootstrap datasets and operator-curated import/override lists are omitted. Data-only personal migrations retain their revision slots as no-ops; generic schema migrations are preserved. The synthetic demo profile is not a source of claims for real candidates.
 
 ## Features
 
@@ -37,12 +28,15 @@ It separates technical fit from deterministic eligibility gates, explains every 
 - Non-destructive job lifecycle with Active, Saved, Applied, Expired, Not Interested, and Archived states.
 - Automatic deadline expiration using a configurable timezone and confidence-aware deadline extraction.
 - Submitted-resume preservation: applied jobs retain the exact generated CV version used.
+- User-controlled multi-portal Apply Assistant delivered as a private Manifest V3 extension, with verified-profile autofill, country-aware confirmed legal answers, exact session resume and role-specific portfolio preparation, final legal review, consistency checks, assessment pauses, and an absolute final-submit block.
 - Official-source adapters for Greenhouse, Lever, Workday, SmartRecruiters, Amazon Jobs, Oracle Recruiting, and selected company career sites.
+- Google Careers discovery decodes public job-specific data and paginates sequentially. The scoped `google_import` task adds current technical internships to the primary candidate only, pins the requested US Summer 2027 Hardware/Software postings without changing eligibility, and sends no email.
 - Community discovery adapters with official-employer verification, provenance, confidence, health, and per-run metrics.
 - Conservative deduplication and repeated verification before a missing job is marked closed.
 - Automated production searches and deadline checks through GitHub Actions, with APScheduler available locally.
 - Priority-only email notifications through SMTP or a safe console preview.
 - Structured, job-specific resume generation with deterministic validation and LaTeX PDF output.
+- Resume Studio: Embedded/Firmware, Software, FPGA, Robotics and General portfolio CVs, with evidence-weighted project selection, professional summaries, private immutable versions and PDF/LaTeX downloads. Generate one profile at a time at `/resume-studio`; no vacancy or external AI provider is required.
 - PostgreSQL with Docker and SQLite as a local fallback.
 
 ## Architecture
@@ -61,6 +55,11 @@ Intern/
 |   |-- app/jobs/             Refresh workflow and scheduler
 |   |-- app/templates/        LaTeX resume template
 |   `-- tests/                Pytest suite
+|-- extension/                Private Chromium Manifest V3 Apply Assistant
+|   |-- src/content/          Shared assistant core, portal detection, and isolated ATS adapters
+|   |-- src/sidepanel/        User-controlled application side panel
+|   |-- src/background/       Short-lived token and resume-download broker
+|   `-- tests/                DOM, safety, policy, and consistency tests
 `-- docker-compose.yml        Frontend, backend, and PostgreSQL
 ```
 
@@ -75,14 +74,112 @@ A first failed verification produces `Needs Verification`, a second produces `Pr
 | **Dashboard** (`/`) | Weekly totals, Apply Today, priority alerts, review and eligibility counters, important opportunities, company-group tabs, live search progress, and the ranked priority queue. |
 | **Jobs** (`/jobs`) | Full-text search, score and eligibility filters, lifecycle tabs for Active, Saved, Applied, Expired, and Not Interested, plus immediate Mark as Applied, Archive, and conditional Restore actions. |
 | **Job detail** (`/jobs/{id}`) | Clean structured role content, requirements, decision rationale, education and special-program eligibility, official verification, source provenance, application tracking, and immutable resume versions with PDF Preview, selected skills, changes, keywords, and LaTeX tabs. |
-| **Applications** (`/applications`) | Saved and submitted roles with editable pipeline status and notes, applied date, official application link, and the preserved submitted resume. |
-| **Profile** (`/profile`) | Verified resume facts, education, skills, projects, languages, work authorization, relocation/search preferences, special-program fields, and email-alert controls. |
+| **Applications** (`/applications`) | Saved and submitted roles plus Apply Assistant history: portal, session state, CV version, confirmed-answer count, consistency findings, source URL, and job snapshot. |
+| **Profile** (`/profile`) | Verified resume facts and a dedicated Application Profile for contact, address, education, languages, links, skills, projects, and the opt-in academic-project disclosure policy. |
 | **Sources** (`/sources`) | Official ATS feeds and community discovery sources with enablement, trust, health, freshness, parser metrics, errors, manual refresh, and custom source management. |
 | **Settings** (`/settings`) | Editable target companies, aliases, priority, preferred roles/locations, individual company searches, and an all-source Search now action. |
 | **Account** (`/account`) | Current Google identity, separate professional and notification contact roles, Google account switching, and sign out. |
 
 Authentication screens cover sign-in, access denial, and fail-closed maintenance
 mode. The left navigation exposes only authenticated workspace pages.
+
+## Multi-Portal Apply Assistant v2.2
+
+Apply Assistant uses one canonical verified profile and a shared `ApplicationAssistantCore`. Runtime URL and DOM evidence select an isolated adapter; the company registry supplies only aliases and special rules. Intel and GE Aerospace reuse Workday, Zipline uses Greenhouse when that implementation is detected, and Microsoft, Amazon, and Oracle use dedicated beta adapters. Unknown HTTPS career sites fall back to a deliberately limited generic adapter.
+
+| Company / flow | Adapter | Status |
+| --- | --- | --- |
+| Intel | Workday | Supported with local Review-page fixtures |
+| GE Aerospace | Workday + GE compliance aliases | Supported with local Review-page fixtures |
+| Zipline | Greenhouse | Current-form regression dry run reaches Review without submitting |
+| Microsoft | Microsoft Careers | Beta; saved-profile conflicts require a user choice |
+| Amazon / AWS | Amazon Jobs | Beta; all assessments pause automation |
+| Oracle | Oracle Careers / detected ATS | Beta; unknown structure fails closed |
+| Other HTTPS portals | Generic safe fields only | Beta |
+| Lever, Ashby, SmartRecruiters, Google Careers | Detection only | Unsupported until adapter fixtures pass |
+
+The application flow is deliberately user-controlled:
+
+1. Open an active job with a secure official application URL.
+2. Select **Apply with Assistant**.
+3. Internship Radar verifies eligibility, selects or generates the job-specific Recommended Resume, ranks two or three matching verified projects, ranks 8–20 verified skills, and shows each relevance reason in Application Readiness. The user can remove projects or skills before continuing.
+4. **Start Application** creates a database-backed Application Session and a revocable token valid for at most 30 minutes.
+5. The web app passes only that scoped token, the session ID, and the public BFF URL to the locally installed extension.
+6. On first use for an origin, the side panel asks permission for that career portal only. **Fill This Page** enters the reviewed session snapshot, attaches the exact prepared PDFs where browser security permits, and adds structured skills/languages individually where supported. Academic projects placed in a required Work Experience field are explicitly labeled as non-professional project work.
+7. Exact recognized work-authorization, sponsorship, citizenship, source, and seasonal-availability questions may reuse current confirmed profile answers under `AUTO_FILL_REVIEW_REQUIRED`; ambiguous or new legal questions remain pending or manual.
+8. **Review Fields** shows all reused legal and eligibility answers together, then compares the visible page with the immutable session snapshots and reports wrong dates, email, location, resume/portfolio version, duplicate address, unverified skills, or misleading project employment.
+9. On every portal's Review page—or any assessment—the assistant stops. It never presses Submit, Apply, Complete Application, Certify and Submit, or Send Application.
+10. After the user submits manually and the portal displays a recognizable confirmation, the side panel asks the user to **Confirm Applied**. Only then does Internship Radar move the job to Applied and bind the exact CV version to its history.
+
+Field policies are enforced in both the adapter and API workflow:
+
+| Policy | Behavior | Typical fields |
+| --- | --- | --- |
+| `AUTO_FILL` | May be entered from the verified snapshot | Name, professional email, phone, address, education, GPA, graduation, links, verified skills and languages |
+| `AUTO_FILL_REVIEW_REQUIRED` | May reuse an exact, previously confirmed, country-aware profile answer; it remains visible in final legal review | Work authorization, sponsorship, citizenship, Zipline source and confirmed seasonal availability |
+| `REVIEW_RECOMMENDED` | May be entered but remains visibly reviewable | Role-specific verified project descriptions, academic experience, availability wording |
+| `CONFIRM_REQUIRED` | A suggestion may be shown, but the user must confirm it for this application | Veteran/disability, government, IP, relocation, numerical salary, legal disclosures, and recognized questions without sufficient context |
+| `MANUAL_ONLY` | Never automated | Passwords, MFA, CAPTCHA, electronic signature, personal certification, unknown questions, final Submit |
+
+The extension has no backend service secret, Google credential, ATS password, or permanent access token. Tokens are HMAC-signed, bound to one owner and one Application Session, scope-limited, short-lived, stored in `chrome.storage.session`, and revoked when the session closes. Career-site access is optional: the side panel requests only the current HTTPS origin after a user action, injects the assistant there, and never monitors unrelated sites or browsing history.
+
+Each Application Session stores immutable copies of the selected projects, application-ready experience text, selected skills, match reasons, validation warnings, and Recommended Resume version. Later profile or ranking changes do not rewrite an older application record.
+
+### Apply Assistant API
+
+Authenticated web/BFF endpoints:
+
+```text
+GET  /api/application-profile
+PUT  /api/application-profile
+GET  /api/jobs/{job_id}/application-readiness
+POST /api/jobs/{job_id}/application-sessions
+GET  /api/application-sessions
+GET  /api/application-sessions/{session_id}
+POST /api/application-sessions/{session_id}/rotate-token
+POST /api/application-sessions/{session_id}/revoke
+POST /api/application-sessions/{session_id}/abandon
+```
+
+Scoped extension-token endpoints:
+
+```text
+GET   /api/extension/application-session
+PATCH /api/extension/application-session/progress
+POST  /api/extension/application-session/confirm-answer
+POST  /api/extension/application-session/confirm-submitted
+GET   /api/extension/application-session/resume.pdf
+GET   /api/extension/application-session/portfolio.pdf
+```
+
+The extension BFF path accepts the Application Session bearer token without exposing or requiring `INTERNAL_API_SECRET`. Every extension request is still subject to `APP_ACCESS_ENABLED`, token signature, expiry, scope, owner, session, and revocation checks.
+
+### Build and install the private extension
+
+```powershell
+Set-Location .\extension
+npm install
+npm run typecheck
+npm test
+npm run build
+```
+
+Chrome or Edge:
+
+1. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
+2. Enable **Developer mode**.
+3. Choose **Load unpacked**.
+4. Select the repository's `extension/dist` directory.
+5. Pin **Internship Radar Apply Assistant**. Its action opens the side panel.
+
+Opera:
+
+1. Open `opera://extensions`.
+2. Enable **Developer mode**.
+3. Choose **Load unpacked** and select `extension/dist`.
+4. Opera is supported where its Chromium version implements Manifest V3 `sidePanel`.
+
+Do not publish this build to the Chrome Web Store. It is intended for private, local installation. See [`extension/README.md`](extension/README.md) for the test workflow and developer diagnostics.
 
 ## Search and Recommendation Flow
 
@@ -188,6 +285,8 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 RESUME_GENERATION_PROVIDER=local
 OPENAI_API_KEY=
 OPENAI_RESUME_MODEL=gpt-5.6
+RESUME_GENERATION_LIMIT_PER_HOUR=30
+RESUME_GENERATION_GLOBAL_CONCURRENCY=2
 TECTONIC_PATH=tectonic
 
 RESUME_EMAIL=resume@example.com
@@ -196,16 +295,12 @@ NOTIFICATION_EMAIL=notifications@example.com
 
 The local resume provider does not require an OpenAI API key. Set `RESUME_GENERATION_PROVIDER=openai` only when structured OpenAI tailoring is desired.
 
+`RESUME_GENERATION_LIMIT_PER_HOUR` must have the same value in the backend and
+the Vercel frontend environment (the default is 30). The backend queue limits
+expensive resume/PDF pipelines with `RESUME_GENERATION_GLOBAL_CONCURRENCY`
+(default 2); it does not use a simplified generation path.
+
 Never commit `.env`, API keys, SMTP credentials, application passwords, personal contact addresses, generated PDFs, or local databases. These files are excluded by `.gitignore`.
-
-### Demo profile
-
-The first local startup seeds `Alex Rivera`, a fictional Computer Engineering
-student, together with fictional projects, courses, contact links, and eligibility
-facts. The sample exists only to exercise ranking and resume generation. Replace
-it through the Profile UI or your own private seed/configuration before using the
-application for a real candidate. Never commit the resulting personal database or
-generated documents.
 
 ## Privacy and Secret Management
 
@@ -475,9 +570,7 @@ target-company match can never override an explicit hard blocker.
 
 ### Work authorization and university eligibility
 
-The included demo profile represents a fictional university student in Mexico.
-Jobs in Mexico, the United States, Canada, and remote roles can be evaluated,
-while each deployment can replace the demo record with its own verified profile.
+The verified student profile is based at Tecnológico de Monterrey in Mexico. Jobs in Mexico, the United States, Canada, and remote roles can be evaluated.
 
 Generic requirements such as “currently enrolled at an accredited university” are accepted. Requirements limited to a specific country, institution, participating-university list, or approved co-op program are treated as hard blockers.
 
@@ -711,10 +804,6 @@ workflow `.github/workflows/scheduled-searches.yml` runs these UTC schedules:
 | Active-job verification | `0 12 * * *` | `python -m app.jobs.verify_active_jobs` |
 | Deadline expiration | `15 12 * * *` | `python -m app.jobs.expire_deadlines` |
 
-The workflow job is guarded by the repository variable
-`AUTOMATION_ENABLED=true`. Without that explicit opt-in, every scheduled event is
-skipped safely.
-
 All workflow runs share Neon PostgreSQL and use a database-level lock, so
 overlapping searches are skipped safely. GitHub Actions schedules use UTC and
 can also be started manually from the Actions tab.
@@ -739,20 +828,19 @@ Never commit the Neon connection string. Internship Radar normalizes a standard
 
 1. Push the repository to GitHub.
 2. In Render, select **New > Blueprint** and choose the repository.
-3. Review `render.yaml`; this public showcase creates only
-   `internship-radar-demo-api` on the Free plan.
+3. Review `render.yaml`; it creates only `internship-radar-api` on the Free plan.
 4. Fill every variable marked `sync: false`.
 5. Paste the Neon pooled URL as `DATABASE_URL`.
 6. Use the generated Web Service URL for `FASTAPI_INTERNAL_URL` in Vercel.
 7. Set `FRONTEND_URL` and `APP_BASE_URL` to the final Vercel production URL.
-8. The Docker startup command prepares and migrates the database before Uvicorn.
+8. Database migrations run through `.github/workflows/database-migrations.yml`
+   whenever migration or model files reach `main`. The web process stays
+   read-only during startup so a migration cannot delay Render's health check.
 9. Open `https://YOUR-API.onrender.com/health`; the first free-tier request can
    take about a minute while the service wakes.
 
-Do not use SQLite for a persistent private deployment on Render because its
-filesystem is ephemeral. The public showcase intentionally accepts that reset
-behavior so it cannot accumulate personal data; persistent installations should
-compile resumes temporarily from LaTeX stored in PostgreSQL.
+Do not use SQLite on Render. The filesystem is ephemeral; resumes are compiled
+temporarily from LaTeX stored in PostgreSQL.
 
 ### Deploy the frontend on Vercel
 
@@ -798,17 +886,6 @@ SMTP_USERNAME                        SMTP account
 SMTP_PASSWORD                        SMTP application password
 SMTP_FROM_EMAIL                      verified sender address
 ```
-
-GitHub Actions repository variables:
-
-```text
-AUTOMATION_ENABLED=true              opt in only after database configuration
-EMAIL_ENABLED=false                  keep false unless SMTP is intentionally configured
-```
-
-The public showcase has no repository secrets or variables. Consequently its
-scheduled jobs are skipped and it cannot access the private production database
-or email account.
 
 Vercel frontend:
 

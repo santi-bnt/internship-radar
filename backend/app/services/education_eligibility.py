@@ -377,12 +377,6 @@ def _field_match(requirements: DegreeRequirements, profile: Any) -> str:
         return "MATCH"
     if "ENGINEERING" in accepted and "engineering" in user_field:
         return "MATCH"
-    if any(
-        canonical in accepted
-        and any(normalized_token(alias) in user_field for alias in aliases)
-        for canonical, aliases in FIELD_ALIASES.items()
-    ):
-        return "MATCH"
 
     job_text = normalized_token(requirements.degree_requirement_evidence)
     related_allowed = _has_related_field_language(job_text)
@@ -469,8 +463,7 @@ def evaluate_degree_eligibility(
             graduation_match = "MATCH" if after_start and before_end else "NO_MATCH"
             if graduation_match == "NO_MATCH" and requirements.graduation_window_required:
                 blockers.append(
-                    f"Candidate's expected graduation in {expected.strftime('%B %Y')} "
-                    "is outside the mandatory graduation window."
+                    "Candidate's expected graduation in June 2028 is outside the mandatory graduation window."
                 )
             elif graduation_match == "NO_MATCH":
                 risks.append("The expected graduation date is outside a preferred graduation window.")

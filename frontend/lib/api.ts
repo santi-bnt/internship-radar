@@ -1,5 +1,16 @@
 const API_URL = "/api/backend";
 
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfterSeconds: number | null = null,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
@@ -14,11 +25,18 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     let message = `${response.status} ${response.statusText}`;
     try {
       const payload = await response.json();
-      message = payload.detail ?? message;
+      if (typeof payload?.detail === "string" && payload.detail.trim()) {
+        message = payload.detail;
+      }
     } catch {
       // Keep the status text when the backend did not return JSON.
     }
-    throw new Error(message);
+    const retryAfter = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
+    throw new ApiError(
+      message,
+      response.status,
+      Number.isFinite(retryAfter) ? retryAfter : null,
+    );
   }
 
   if (response.status === 204) {

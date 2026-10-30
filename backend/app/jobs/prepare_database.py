@@ -36,7 +36,9 @@ def main() -> int:
     schema = inspect(engine)
     if "alembic_version" in schema.get_table_names():
         command.upgrade(config, "head")
-        print("Database upgraded to the latest Alembic revision.")
+        init_db()
+        _verify_model_schema()
+        print("Database upgraded, seeded, and verified at the latest Alembic revision.")
         return 0
 
     # Older Internship Radar releases used create_all without an Alembic version.

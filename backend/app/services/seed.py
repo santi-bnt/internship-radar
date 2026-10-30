@@ -23,6 +23,9 @@ from app.services.resume_generation import (
     CANONICAL_STUDENT_TITLE,
 )
 from app.services.target_companies import seed_records
+from app.services.discovery_orchestration import source_domain, source_group
+from app.services.discovery_orchestration import source_domain, source_group
+from app.services.discovery_orchestration import source_domain, source_group
 from app.sources.company_sources import OFFICIAL_COMPANY_SOURCES
 from app.sources.community_sources import COMMUNITY_SOURCES
 
@@ -49,6 +52,7 @@ WATCHLIST = [
     "Cisco",
     "Microsoft",
     "Google",
+    "Duolingo",
     "Meta",
     "IBM",
     "Oracle",
@@ -57,6 +61,7 @@ WATCHLIST = [
     "SpaceX",
     "Astranis",
     "Zoox",
+    "Roblox",
     "Anduril",
     "Zipline",
     "GE Vernova",
@@ -78,6 +83,29 @@ WATCHLIST = [
     "STMicroelectronics",
     "Synopsys",
     "Cadence",
+    "FORVIA HELLA",
+    "HPE",
+    "Hewlett Packard Enterprise",
+    "HP",
+    "Jabil",
+    "Flex",
+    "Plexus",
+    "Micron",
+    "Sanmina",
+    "AstraZeneca",
+    "Capgemini Engineering",
+    # Broad discovery targets.  They remain reference-only until an official
+    # adapter/ATS endpoint is configured, so this never fabricates listings.
+    "Apple", "Texas Instruments", "Analog Devices", "Applied Materials",
+    "Lam Research", "KLA", "ASML", "Lucid", "GE Aerospace", "RTX",
+    "Lockheed Martin", "Northrop Grumman", "Blue Origin", "Boston Dynamics",
+    "Stripe", "Datadog", "Snowflake", "Confluent", "Palantir", "Uber",
+    "Lyft", "DoorDash", "Airbnb", "Reddit", "Pinterest", "LinkedIn",
+    "Salesforce", "ServiceNow", "Dell", "Autodesk", "MathWorks", "Bloomberg",
+    "Jane Street", "Five Rings", "Hudson River Trading", "Citadel", "IMC",
+    "Optiver", "Shopify", "BlackBerry", "Magna", "Celestica", "Thales Canada",
+    "Ericsson Canada", "AMD Canada", "Amazon Canada", "Microsoft Canada",
+    "Google Canada", "NVIDIA Canada", "Intel Canada", "Qualcomm Canada",
 ]
 
 PUBLIC_COMPANY_SOURCES = OFFICIAL_COMPANY_SOURCES + [
@@ -248,7 +276,7 @@ VERIFIED_COURSES = [
 
 
 def enrich_resume_profile(db: Session) -> None:
-    profile = db.scalar(select(ResumeProfile).limit(1))
+    profile = db.scalar(select(ResumeProfile).where(ResumeProfile.user_id == settings.effective_primary_user_id).limit(1))
     if profile is None:
         return
     profile.user_id = settings.effective_primary_user_id
@@ -355,6 +383,9 @@ def enrich_resume_profile(db: Session) -> None:
 
 
 def seed_profile_and_sources(db: Session) -> None:
+    db.info['owner_user_id'] = settings.effective_primary_user_id
+    db.info['owner_user_id'] = settings.effective_primary_user_id
+    db.info['owner_user_id'] = settings.effective_primary_user_id
     existing_targets = {
         name.lower()
         for name in db.scalars(select(TargetCompany.company_name))
@@ -362,7 +393,7 @@ def seed_profile_and_sources(db: Session) -> None:
     for target_data in seed_records():
         if target_data["company_name"].lower() not in existing_targets:
             db.add(TargetCompany(**target_data))
-    base_profile = db.scalar(select(UserProfile).limit(1))
+    base_profile = db.scalar(select(UserProfile).where(UserProfile.owner_user_id == settings.effective_primary_user_id).limit(1))
     if base_profile is None:
         db.add(
             UserProfile(
@@ -477,7 +508,7 @@ def seed_profile_and_sources(db: Session) -> None:
 
     db.flush()
     if db.scalar(select(ResumeProfile.id).limit(1)) is None:
-        base_profile = db.scalar(select(UserProfile).limit(1))
+        base_profile = db.scalar(select(UserProfile).where(UserProfile.owner_user_id == settings.effective_primary_user_id).limit(1))
         if base_profile:
             db.add(
                 ResumeProfile(
@@ -662,3 +693,8 @@ def seed_profile_and_sources(db: Session) -> None:
                 job.analysis.recommendation = "Needs Verification"
     enrich_resume_profile(db)
     db.commit()
+
+
+def ensure_santiago_resume_projects(profile: ResumeProfile) -> bool:
+    """Private per-person reconciliation is not distributed in the showcase."""
+    return False

@@ -52,11 +52,13 @@ NOT_AVAILABLE_PATTERNS = (
     r"\bnot eligible for (?:visa |immigration |employment )?sponsorship\b",
     r"\b(?:we|company|employer) (?:are|is) unable to sponsor\b",
     r"\b(?:cannot|can not|will not|won t) sponsor\b",
+    r"\bwill not (?:offer|provide) (?:work authorization |visa |immigration |employment )?sponsorship\b",
     r"\bno sponsorship (?:now|currently)(?: or in the future)?\b",
     r"\bwithout (?:current or future )?sponsorship\b",
     r"\bmust (?:have|possess) (?:unrestricted|permanent) (?:u s )?work authorization\b",
     r"\bapplicants? must have unrestricted work authorization\b",
     r"\bmust (?:be|already be) (?:legally )?authorized to work in (?:the )?(?:u s|united states)\b",
+    r"\bmust be currently eligible to work in (?:the )?(?:u s|united states)\b",
     r"\b(?:u s|united states) work authorization (?:is )?required\b",
 )
 AVAILABLE_PATTERNS = (
@@ -71,6 +73,7 @@ NOT_REQUIRED_PATTERNS = (
 )
 US_AUTHORIZATION_PATTERNS = (
     r"\bmust (?:be|already be) (?:legally )?authorized to work in (?:the )?(?:u s|united states)\b",
+    r"\bmust be currently eligible to work in (?:the )?(?:u s|united states)\b",
     r"\b(?:u s|united states) work authorization (?:is )?required\b",
     r"\bunrestricted (?:u s )?work authorization\b",
 )

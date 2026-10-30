@@ -22,6 +22,7 @@ def make_job(base_job, *, country="United States", location="Austin, Texas, Unit
     ("country", "location", "text", "expected"),
     [
         ("United States", "Austin, Texas, United States", "We will not sponsor employment visas.", "NOT_ELIGIBLE"),
+        ("United States", "Austin, Texas, United States", "This opportunity will not offer work authorization sponsorship. Interested candidates must be currently eligible to work in the US.", "NOT_ELIGIBLE"),
         ("United States", "Austin, Texas, United States", "Employment sponsorship is available.", "LIKELY_ELIGIBLE"),
         ("United States", "Austin, Texas, United States", "", "UNKNOWN"),
         ("Mexico", "Monterrey, Mexico", "", "ELIGIBLE"),

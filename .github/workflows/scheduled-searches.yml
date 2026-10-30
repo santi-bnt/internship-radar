@@ -3,9 +3,9 @@ name: Internship Radar scheduled searches
 on:
   schedule:
     - cron: "15 */6 * * *"
-    - cron: "30 11 * * *"
-    - cron: "0 12 * * *"
-    - cron: "15 12 * * *"
+    - cron: "30 3 * * *"
+    - cron: "30 9 * * *"
+    - cron: "30 15 * * *"
   workflow_dispatch:
     inputs:
       task:
@@ -18,6 +18,12 @@ on:
           - general
           - verification
           - expire_deadlines
+          - gdl_remote
+          - prepare_only
+          - google_import
+          - priority_import
+          - force_apply_import
+          - restore_five_rings
 
 permissions:
   contents: read
@@ -28,7 +34,7 @@ concurrency:
 
 jobs:
   search:
-    if: vars.AUTOMATION_ENABLED == 'true'
+    if: ${{ vars.ENABLE_PUBLIC_AUTOMATION == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -38,7 +44,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SCHEDULER_ENABLED: "false"
       SEARCH_SCHEDULER_ENABLED: "false"
-      EMAIL_ENABLED: ${{ vars.EMAIL_ENABLED || 'false' }}
+      EMAIL_ENABLED: "true"
       EMAIL_PROVIDER: smtp
       EMAIL_RECIPIENT: ${{ secrets.NOTIFICATION_EMAIL }}
       NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
@@ -59,10 +65,10 @@ jobs:
       PRIMARY_USER_ID: ${{ secrets.PRIMARY_USER_ID }}
     steps:
       - name: Check out main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -72,7 +78,16 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Prepare database
+        id: prepare_database
+        if: inputs.task != 'prepare_only' && inputs.task != 'google_import' && inputs.task != 'priority_import' && inputs.task != 'force_apply_import' && inputs.task != 'restore_five_rings'
         run: python -m app.jobs.prepare_database
+
+      - name: Apply schema migration without searches or profile seeding
+        id: schema_migration
+        if: inputs.task == 'prepare_only'
+        run: |
+          python -m alembic upgrade head
+          python -c "from app.jobs.prepare_database import _verify_model_schema; _verify_model_schema(); print('Model schema verified.')"
 
       - name: Select scheduled task
         id: selected
@@ -83,26 +98,78 @@ jobs:
           else
             case "${{ github.event.schedule }}" in
               "15 */6 * * *") task="high_priority" ;;
-              "30 11 * * *") task="general" ;;
-              "0 12 * * *") task="verification" ;;
-              "15 12 * * *") task="expire_deadlines" ;;
+              "30 3 * * *") task="general" ;;
+              "30 9 * * *") task="verification" ;;
+              "30 15 * * *") task="expire_deadlines" ;;
               *) echo "Unknown schedule"; exit 1 ;;
             esac
           fi
           echo "task=$task" >> "$GITHUB_OUTPUT"
 
       - name: Run high-priority search
+        id: high_priority
         if: steps.selected.outputs.task == 'high_priority'
         run: python -m app.jobs.search_high_priority
 
+      - name: Import Santiago's verified Force Apply Now postings
+        id: force_apply_import
+        if: steps.selected.outputs.task == 'force_apply_import'
+        run: python -m app.jobs.import_santiago_force_apply --apply
+
       - name: Run general search
+        id: general_search
         if: steps.selected.outputs.task == 'general'
         run: python -m app.jobs.search_general
 
       - name: Verify active jobs
+        id: verification
         if: steps.selected.outputs.task == 'verification'
         run: python -m app.jobs.verify_active_jobs
 
       - name: Expire past deadlines
+        id: expire_deadlines
         if: steps.selected.outputs.task == 'expire_deadlines'
         run: python -m app.jobs.expire_deadlines
+
+      - name: Run Guadalajara / Mexico-remote audit
+        id: gdl_remote
+        if: steps.selected.outputs.task == 'gdl_remote'
+        run: python -m app.jobs.search_gdl_remote
+
+      - name: Import verified Google internships for the primary candidate only
+        id: google_import
+        if: steps.selected.outputs.task == 'google_import' || steps.selected.outputs.task == 'general'
+        run: python -m app.jobs.import_google --apply --all-users
+
+      - name: Import candidate-requested official priority postings
+        id: priority_import
+        if: steps.selected.outputs.task == 'priority_import'
+        run: python -m app.jobs.import_priority_jobs --apply
+
+      - name: Restore the requested Five Rings official requisition
+        id: restore_five_rings
+        if: steps.selected.outputs.task == 'restore_five_rings'
+        run: python -m app.jobs.restore_five_rings --apply
+
+      - name: Summarize scheduled search groups
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Scheduled search summary"
+            echo "Selected task: \`${{ steps.selected.outputs.task || 'unknown' }}\`"
+            echo ""
+            echo "| Group | Result |"
+            echo "| --- | --- |"
+            echo "| Database preparation | \`${{ steps.prepare_database.outcome || 'skipped' }}\` |"
+            echo "| Schema migration | \`${{ steps.schema_migration.outcome || 'skipped' }}\` |"
+            echo "| High-priority search | \`${{ steps.high_priority.outcome || 'skipped' }}\` |"
+            echo "| General search | \`${{ steps.general_search.outcome || 'skipped' }}\` |"
+            echo "| Active-job verification | \`${{ steps.verification.outcome || 'skipped' }}\` |"
+            echo "| Deadline expiration | \`${{ steps.expire_deadlines.outcome || 'skipped' }}\` |"
+            echo "| Guadalajara / Mexico-remote audit | \`${{ steps.gdl_remote.outcome || 'skipped' }}\` |"
+            echo "| Google Careers import | \`${{ steps.google_import.outcome || 'skipped' }}\` |"
+            echo "| Priority postings import | \`${{ steps.priority_import.outcome || 'skipped' }}\` |"
+            echo "| Force Apply postings import | \`${{ steps.force_apply_import.outcome || 'skipped' }}\` |"
+            echo "| Five Rings restore | \`${{ steps.restore_five_rings.outcome || 'skipped' }}\` |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

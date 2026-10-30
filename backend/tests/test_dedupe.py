@@ -45,3 +45,17 @@ def test_apply_url_is_a_strong_deduplication_key():
         "apply_url": "https://jobs.example.com/42",
     }
     assert same_job(left, right)
+
+
+def test_tracking_query_parameters_do_not_create_another_canonical_job():
+    left = {
+        "company": "Plexus",
+        "title": "Intern, Software Development",
+        "location": "Zapopan, Jalisco, Mexico",
+        "apply_url": "https://careers.example.com/jobs/99?jobId=99&utm_source=linkedin&ref=feed",
+    }
+    right = {
+        **left,
+        "apply_url": "https://careers.example.com/jobs/99?trackingId=abc&jobId=99&utm_medium=social",
+    }
+    assert same_job(left, right)

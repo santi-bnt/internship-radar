@@ -22,6 +22,7 @@ from app.services.special_program_eligibility import (
     extract_special_program_signals,
 )
 from app.services.normalization import clean_text, normalized_token
+from app.services.resume_skills import build_verified_skill_registry, canonicalize_skill, _occurrences
 
 
 SKILL_ALIASES = {
@@ -63,7 +64,7 @@ HARD_BLOCKERS = (
 
 UNIVERSITY_BLOCKER_REASON = (
     "Requires enrollment at a university in a specific country or institution. "
-    "The candidate's configured university does not satisfy that restriction."
+    "The user studies at Tecnológico de Monterrey in Mexico."
 )
 
 # These patterns are deliberately limited to explicit country, institution, or
@@ -130,24 +131,17 @@ def _combine_gate_states(*states: str) -> str:
 
 
 def _profile_skills(profile: Any) -> set[str]:
-    skills = value(profile, "skills", []) or []
-    return {normalized_token(skill) for skill in skills}
+    return set(build_verified_skill_registry(profile))
 
 
 def _has_profile_skill(skill: str, aliases: tuple[str, ...], skills: set[str]) -> bool:
-    normalized_aliases = {normalized_token(alias) for alias in aliases}
-    return any(
-        candidate == skill
-        or candidate in normalized_aliases
-        or any(alias and (alias in candidate or candidate in alias) for alias in normalized_aliases)
-        for candidate in skills
-    )
+    return canonicalize_skill(skill).casefold() in {item.casefold() for item in skills}
 
 
 def _skill_matches(job: Any, profile: Any) -> tuple[list[str], list[str], list[str], float]:
-    required = normalized_token(value(job, "requirements", ""))
-    preferred = normalized_token(value(job, "preferred_qualifications", ""))
-    body = normalized_token(
+    required = value(job, "requirements", "") or ""
+    preferred = value(job, "preferred_qualifications", "") or ""
+    body = (
         " ".join(
             [
                 value(job, "title", "") or "",
@@ -164,13 +158,12 @@ def _skill_matches(job: Any, profile: Any) -> tuple[list[str], list[str], list[s
     points = 18.0
 
     for skill, aliases in SKILL_ALIASES.items():
-        aliases_normalized = tuple(normalized_token(alias) for alias in aliases)
-        appears = any(alias and alias in body for alias in aliases_normalized)
+        appears = _occurrences(skill, body) > 0
         if not appears:
             continue
         has_skill = _has_profile_skill(skill, aliases, profile_skills)
-        is_required = any(alias and alias in required for alias in aliases_normalized)
-        is_preferred = any(alias and alias in preferred for alias in aliases_normalized)
+        is_required = _occurrences(skill, required) > 0
+        is_preferred = _occurrences(skill, preferred) > 0
         if has_skill:
             matched.append(skill)
             points += 11 if is_required else 7 if is_preferred else 6
@@ -277,7 +270,7 @@ def _freshness(job: Any) -> float:
     return max(0, min(100, score))
 
 
-def analyze_job(job: Any, profile: Any) -> AnalysisResult:
+def analyze_job(job: Any, profile: Any, verified_profile: Any | None = None) -> AnalysisResult:
     title = clean_text(value(job, "title", ""))
     country = clean_text(value(job, "country", ""))
     location = clean_text(value(job, "location", ""))
@@ -302,7 +295,7 @@ def analyze_job(job: Any, profile: Any) -> AnalysisResult:
         special_program_signals,
         profile,
     )
-    matched, missing_required, missing_preferred, technical = _skill_matches(job, profile)
+    matched, missing_required, missing_preferred, technical = _skill_matches(job, verified_profile or profile)
     blockers = [reason for pattern, reason in HARD_BLOCKERS if re.search(pattern, full_text, re.IGNORECASE)]
     university_status, university_blocker = university_eligibility(full_text)
     if university_blocker:
@@ -483,7 +476,16 @@ def analyze_job(job: Any, profile: Any) -> AnalysisResult:
         recommendation = "Review"
         eligibility_status = "LIKELY_INELIGIBLE"
     elif gate_state == "UNKNOWN":
-        recommendation = "Review"
+        # An unresolved sponsorship/work-authorisation fact on a US role is a
+        # specific application blocker: it requires verification before Apply
+        # Today. Other unknowns (for example community-source metadata) keep
+        # the established Review outcome.
+        unresolved_us_authorization = (
+            eligibility_decision.state == "UNKNOWN"
+            and bool(value(job, "job_requires_work_in_us", False))
+            and signals.sponsorship_status == "UNKNOWN"
+        )
+        recommendation = "Needs Verification" if unresolved_us_authorization else "Review"
         eligibility_status = "UNKNOWN"
     elif official_status != "open" or verification_status != "verified":
         recommendation = "Needs Verification"

@@ -7,8 +7,9 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.services.company_portal_registry import greenhouse_application_url
 from app.services.normalization import validate_public_url
-from app.sources.base import JobSourceAdapter, NormalizedJob
+from app.sources.base import JobSourceAdapter, NormalizedJob, is_target_internship_title
 
 
 class GreenhouseAdapter(JobSourceAdapter):
@@ -22,11 +23,8 @@ class GreenhouseAdapter(JobSourceAdapter):
 
     @staticmethod
     def is_internship_title(title: str) -> bool:
-        normalized = title.lower().replace("_", " ")
-        return any(
-            term in normalized
-            for term in ("intern", "internship", "co-op", "co op", "student")
-        )
+        """Use the common technical internship and early-career role policy."""
+        return is_target_internship_title(title)
 
     async def fetch_jobs(self) -> list[dict[str, Any]]:
         validate_public_url(self.api_url)
@@ -65,17 +63,19 @@ class GreenhouseAdapter(JobSourceAdapter):
 
     def normalize_job(self, raw: dict[str, Any]) -> NormalizedJob:
         location = (raw.get("location") or {}).get("name", "")
+        official_listing_url = raw.get("absolute_url", "")
+        application_url = greenhouse_application_url(self.source_identifier, raw.get("id", "")) or official_listing_url
         return self.build_job(
             raw,
             external_id=raw.get("id"),
             title=raw.get("title", ""),
             location=location,
             description=raw.get("content", ""),
-            apply_url=raw.get("absolute_url", ""),
+            apply_url=application_url,
             posted_at=raw.get("updated_at"),
             official_posted_at=raw.get("updated_at"),
-            original_source_url=raw.get("absolute_url", ""),
-            official_apply_url=raw.get("absolute_url", ""),
+            original_source_url=official_listing_url,
+            official_apply_url=application_url,
             official_status="open",
             verification_status="verified",
             verification_method="official_greenhouse_api",

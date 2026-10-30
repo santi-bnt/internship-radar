@@ -1,10 +1,11 @@
 "use client";
 
 import { Building2, ExternalLink, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, formatDate } from "@/lib/api";
-import type { CompanySource } from "@/lib/types";
+import type { CompanySource, SearchRun } from "@/lib/types";
 
 const emptyForm = {
   company: "",
@@ -29,6 +30,8 @@ export default function SourcesPage() {
   const [query, setQuery] = useState("");
   const [message, setMessage] = useState("");
   const [refreshing, setRefreshing] = useState(false);
+  const [importingRequested, setImportingRequested] = useState(false);
+  const [scanRun, setScanRun] = useState<SearchRun | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -40,7 +43,46 @@ export default function SourcesPage() {
 
   useEffect(() => {
     void load();
+    void api<SearchRun>("/api/search-runs/latest")
+      .then((run) => {
+        if (run.status === "pending" || run.status === "running") {
+          setScanRun(run);
+          setRefreshing(true);
+        }
+      })
+      .catch(() => undefined);
   }, [load]);
+
+  const activeScanId = scanRun?.status === "pending" || scanRun?.status === "running" ? scanRun.id : null;
+  useEffect(() => {
+    if (!activeScanId) return;
+    let cancelled = false;
+    let timer: number;
+    const poll = async () => {
+      try {
+        const run = await api<SearchRun>(`/api/search-runs/${activeScanId}`);
+        if (cancelled) return;
+        setScanRun(run);
+        if (run.status !== "pending" && run.status !== "running") {
+          setRefreshing(false);
+          setMessage(run.status === "failed"
+            ? run.safe_error_summary || "Source scan failed."
+            : `Source scan complete: ${run.jobs_added} new jobs, ${run.jobs_updated} updated, ${run.error_count} source errors.`);
+          void load();
+          return;
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setMessage(error instanceof Error ? `Scan status delayed: ${error.message}` : "Scan status delayed. Retrying.");
+      }
+      timer = window.setTimeout(poll, 5000);
+    };
+    timer = window.setTimeout(poll, 5000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeScanId, load]);
 
   const visibleSources = useMemo(
     () => sources.filter((source) => source.company.toLowerCase().includes(query.toLowerCase())),
@@ -86,17 +128,41 @@ export default function SourcesPage() {
 
   async function refresh() {
     setRefreshing(true);
+    setMessage("");
     try {
-      const result = await api<{ jobs_created: number; jobs_updated: number; errors: unknown[] }>(
-        "/api/sources/refresh",
-        { method: "POST" },
+      const started = await api<SearchRun>("/api/jobs/search", { method: "POST" });
+      setScanRun(started);
+      setMessage("Scanning enabled sources in the background. You can leave this page safely.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not start source scan.");
+      setRefreshing(false);
+    }
+  }
+
+  async function importRequestedOpportunities() {
+    setImportingRequested(true);
+    setMessage("");
+    try {
+      const result = await api<{
+        status: string;
+        imported_count: number;
+        jobs: Array<{ id: number; company: string; title: string; external_id: string; recommendation: string }>;
+        source_failures: string[];
+      }>("/api/santiago/opportunities/import", { method: "POST" });
+      const imported = result.jobs.map((job) => `${job.company}: ${job.title} (${job.recommendation})`);
+      const failures = result.source_failures.length
+        ? ` Official-source checks needing attention: ${result.source_failures.join(", ")}.`
+        : "";
+      setMessage(
+        result.imported_count
+          ? `Imported or refreshed ${result.imported_count} verified Santiago opportunities. ${imported.join(" · ")}.${failures}`
+          : `No currently open requested opportunities were verified for import.${failures}`,
       );
-      setMessage(`${result.jobs_created} new jobs, ${result.jobs_updated} refreshed, ${result.errors.length} errors.`);
       await load();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Refresh failed.");
+      setMessage(error instanceof Error ? error.message : "Could not import verified opportunities.");
     } finally {
-      setRefreshing(false);
+      setImportingRequested(false);
     }
   }
 
@@ -106,15 +172,33 @@ export default function SourcesPage() {
         <div>
           <p className="eyebrow">Discovery inputs</p>
           <h1>Discovery Sources</h1>
-          <p className="page-subtitle">Official feeds, ATS boards, and community repositories with separate verification standards.</p>
+          <p className="page-subtitle">Enable the portals below, then scan them for new jobs. <Link href="/jobs">Search saved jobs</Link> in Jobs.</p>
         </div>
-        <button className="button primary" onClick={refresh} disabled={refreshing}>
-          <RefreshCw size={16} className={refreshing ? "spin" : ""} />
-          {refreshing ? "Refreshing" : "Refresh enabled"}
-        </button>
+        <div className="header-actions source-header-actions">
+          <button className="button secondary" onClick={importRequestedOpportunities} disabled={importingRequested}>
+            <RefreshCw size={16} className={importingRequested ? "spin" : ""} />
+            {importingRequested ? "Verifying requested jobs" : "Import verified requested jobs"}
+          </button>
+          <button className="button primary" onClick={refresh} disabled={refreshing}>
+            <RefreshCw size={16} className={refreshing ? "spin" : ""} />
+            {refreshing ? "Scanning sources" : "Scan enabled sources"}
+          </button>
+        </div>
       </header>
 
       {message && <div className="notice" role="status">{message}</div>}
+      {refreshing && scanRun && (
+        <section className="search-progress-card" role="status" aria-live="polite">
+          <RefreshCw size={21} className="spin" />
+          <div className="search-progress-main"><strong>Scanning sources</strong><span>{scanRun.progress_status}</span></div>
+          <dl>
+            <div><dt>Sources checked</dt><dd>{scanRun.progress_json.sources_checked ?? 0} / {scanRun.progress_json.sources_total ?? "—"}</dd></div>
+            <div><dt>Jobs discovered</dt><dd>{scanRun.progress_json.jobs_discovered ?? 0}</dd></div>
+            <div><dt>New jobs</dt><dd>{scanRun.jobs_added}</dd></div>
+            <div><dt>Updated</dt><dd>{scanRun.jobs_updated}</dd></div>
+          </dl>
+        </section>
+      )}
 
       <section className="source-add form-section">
         <div className="form-section-title"><Plus size={18} /><h2>Add a source</h2></div>
@@ -173,14 +257,16 @@ export default function SourcesPage() {
                 <strong>{source.company}</strong>
                 <span>{source.registry_type.replaceAll("_", " ")} · {source.trust_level} trust · priority {source.priority}</span>
                 <span>{source.source_type.replaceAll("_", " ")} · {source.source_identifier}</span>
-                <span>{source.parsed_count} parsed · {source.new_jobs_count} new · {source.duplicate_count} duplicates</span>
-                <span>{source.officially_verified_count} verified · {source.unverified_count} unverified · {source.error_count} errors</span>
+                <span>{source.jobs_discovered} discovered · {source.jobs_verified} verified · {source.duplicate_count} duplicates</span>
+                <span>Parser {source.parser_version} · {source.consecutive_failures} consecutive failures</span>
+                {source.safe_error_message && <span className="source-error-detail">{source.last_error_type}: {source.safe_error_message}{source.http_status ? ` (HTTP ${source.http_status})` : ""}</span>}
               </div>
               <div className="source-status">
                 <span className={`status-dot ${source.last_status === "Error" ? "error" : source.enabled ? "ok" : ""}`} />
                 <div>
                   <strong>{source.source_status}</strong>
-                  <span>{source.last_refresh_at ? formatDate(source.last_refresh_at) : "Not refreshed"}</span>
+                  <span>Last attempt: {source.last_attempt_at ? formatDate(source.last_attempt_at) : "Never"}</span>
+                  <span>Last success: {source.last_success_at ? formatDate(source.last_success_at) : "Never"}</span>
                   <span>{source.duration_ms ? `${source.duration_ms} ms` : "No duration"}</span>
                 </div>
               </div>

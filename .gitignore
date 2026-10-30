@@ -8,11 +8,13 @@ __pycache__/
 *.py[cod]
 *.db
 *.log
+.local-logs/
 .pytest_cache/
 node_modules/
 .next/
 frontend/.next/
 frontend/out/
+extension/dist/
 *.tsbuildinfo
 coverage/
 artifacts/
@@ -20,3 +22,5 @@ output/
 tmp/
 .DS_Store
 Thumbs.db
+.serena/
+.codex/

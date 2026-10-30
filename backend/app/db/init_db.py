@@ -4,21 +4,43 @@ from app.core.config import settings
 from app.db.session import Base, SessionLocal, engine
 from app.models import (
     Application,
+    ApplicationAnswerRegistry,
+    ApplicationProfile,
+    ApplicationSession,
+    CompanyPortalRegistry,
+    CandidateJobOverride,
     CompanySource,
     GeneratedResume,
+    GeneratedPortfolio,
     Job,
     JobAnalysis,
     Notification,
     ResumeProfile,
     SearchRun,
+    SearchRunJob,
     TargetCompany,
     TargetSearchRun,
     UserProfile,
 )
+from app.services.company_portal_registry import COMPANY_PORTAL_REGISTRY
+from app.security.identity import JOSHUA_EMAIL, JOSHUA_USER_ID
 
 
 SQLITE_ADDITIONS = {
     "user_profiles": {
+        "display_name": "VARCHAR(80) NOT NULL DEFAULT ''",
+        "gpa_scale_status": "VARCHAR(40) NOT NULL DEFAULT 'CONFIRMED'",
+        "current_semester": "INTEGER",
+        "official_degree_name": "VARCHAR(240)",
+        "official_degree_name_status": "VARCHAR(40) NOT NULL DEFAULT 'CONFIRMED'",
+        "citizenship_status": "VARCHAR(40) NOT NULL DEFAULT 'CONFIRMED'",
+        "us_authorization_conflict_detected": "BOOLEAN NOT NULL DEFAULT 0",
+        "work_authorization_raw_statement": "TEXT NOT NULL DEFAULT ''",
+        "minimum_hours_per_week": "INTEGER",
+        "github_url": "TEXT NOT NULL DEFAULT ''",
+        "linkedin_url": "TEXT NOT NULL DEFAULT ''",
+        "onboarding_status": "VARCHAR(40) NOT NULL DEFAULT 'PROFILE_READY'",
+        "profile_warnings": "JSON NOT NULL DEFAULT '[]'",
         "owner_user_id": "VARCHAR(160) NOT NULL DEFAULT 'primary-user'",
         "citizenship_country": "VARCHAR(100) NOT NULL DEFAULT 'Mexico'",
         "work_authorized_countries": """JSON NOT NULL DEFAULT '["Mexico"]'""",
@@ -27,7 +49,7 @@ SQLITE_ADDITIONS = {
         "degree_level_current": "VARCHAR(30) NOT NULL DEFAULT 'BACHELORS'",
         "degree_status": "VARCHAR(40) NOT NULL DEFAULT 'IN_PROGRESS'",
         "expected_graduation_date": "DATE",
-        "degree_field": "VARCHAR(240) NOT NULL DEFAULT 'Computer Engineering'",
+        "degree_field": "VARCHAR(240) NOT NULL DEFAULT 'Robotics and Digital Systems Engineering'",
         "veteran_status": "VARCHAR(30) NOT NULL DEFAULT 'NOT_VETERAN'",
         "military_status": "VARCHAR(40) NOT NULL DEFAULT 'NONE'",
         "military_spouse": "BOOLEAN NOT NULL DEFAULT 0",
@@ -55,6 +77,12 @@ SQLITE_ADDITIONS = {
         "immediate_priority_alerts": "BOOLEAN NOT NULL DEFAULT 1",
     },
     "jobs": {
+        "opportunity_type": "VARCHAR(40) NOT NULL DEFAULT 'job'",
+        "lab": "VARCHAR(240) NOT NULL DEFAULT ''",
+        "supervisor": "VARCHAR(240) NOT NULL DEFAULT ''",
+        "research_areas": "JSON NOT NULL DEFAULT '[]'",
+        "research_url": "TEXT NOT NULL DEFAULT ''",
+        "research_notes": "TEXT NOT NULL DEFAULT ''",
         "owner_user_id": "VARCHAR(160) NOT NULL DEFAULT 'primary-user'",
         "city": "VARCHAR(140) NOT NULL DEFAULT ''",
         "region": "VARCHAR(140) NOT NULL DEFAULT ''",
@@ -86,6 +114,12 @@ SQLITE_ADDITIONS = {
         "area": "VARCHAR(100) NOT NULL DEFAULT 'Unknown'",
         "company_importance": "VARCHAR(50) NOT NULL DEFAULT 'Unknown'",
         "official_apply_url": "TEXT",
+        "posting_url": "TEXT NOT NULL DEFAULT ''",
+        "application_url": "TEXT NOT NULL DEFAULT ''",
+        "application_url_source": "VARCHAR(80) NOT NULL DEFAULT 'UNKNOWN'",
+        "application_url_status": "VARCHAR(30) NOT NULL DEFAULT 'UNKNOWN'",
+        "application_url_last_verified_at": "DATETIME",
+        "application_url_diagnostic": "VARCHAR(80) NOT NULL DEFAULT ''",
         "original_source_url": "TEXT NOT NULL DEFAULT ''",
         "discovered_from": "VARCHAR(100) NOT NULL DEFAULT ''",
         "discovered_from_source": "VARCHAR(180) NOT NULL DEFAULT ''",
@@ -144,6 +178,7 @@ SQLITE_ADDITIONS = {
     "applications": {
         "owner_user_id": "VARCHAR(160) NOT NULL DEFAULT 'primary-user'",
         "submitted_resume_id": "INTEGER",
+        "application_session_id": "INTEGER",
     },
     "notifications": {
         "owner_user_id": "VARCHAR(160) NOT NULL DEFAULT 'primary-user'",
@@ -173,6 +208,24 @@ SQLITE_ADDITIONS = {
         "unverified_count": "INTEGER NOT NULL DEFAULT 0",
         "error_count": "INTEGER NOT NULL DEFAULT 0",
         "duration_ms": "INTEGER NOT NULL DEFAULT 0",
+        "last_attempt_at": "DATETIME",
+        "last_success_at": "DATETIME",
+        "last_error_at": "DATETIME",
+        "last_error_type": "VARCHAR(50) NOT NULL DEFAULT ''",
+        "safe_error_message": "TEXT NOT NULL DEFAULT ''",
+        "http_status": "INTEGER",
+        "parser_version": "VARCHAR(40) NOT NULL DEFAULT '1'",
+        "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
+        "jobs_discovered": "INTEGER NOT NULL DEFAULT 0",
+        "jobs_verified": "INTEGER NOT NULL DEFAULT 0",
+        "discovery_group": "VARCHAR(40) NOT NULL DEFAULT 'GENERAL'",
+        "geography_scope": "VARCHAR(30) NOT NULL DEFAULT 'US_CANADA'",
+        "source_domain": "VARCHAR(255) NOT NULL DEFAULT ''",
+        "next_run_at": "DATETIME",
+        "backoff_until": "DATETIME",
+        "rate_limited_until": "DATETIME",
+        "retry_after_seconds": "INTEGER",
+        "discovery_checkpoint_json": "JSON NOT NULL DEFAULT '{}'",
     },
     "target_companies": {
         "owner_user_id": "VARCHAR(160) NOT NULL DEFAULT 'primary-user'",
@@ -183,12 +236,51 @@ SQLITE_ADDITIONS = {
     "search_runs": {
         "owner_user_id": "VARCHAR(160) NOT NULL DEFAULT 'primary-user'",
         "source_metrics": """JSON NOT NULL DEFAULT '[]'""",
+        "criteria_json": """JSON NOT NULL DEFAULT '{}'""",
+        "progress_json": """JSON NOT NULL DEFAULT '{}'""",
+        "result_count": "INTEGER NOT NULL DEFAULT 0",
+        "eligible_count": "INTEGER NOT NULL DEFAULT 0",
+        "verified_count": "INTEGER NOT NULL DEFAULT 0",
+        "history_deleted_at": "DATETIME",
+    },
+    "application_profiles": {
+        "job_discovery_source": "VARCHAR(60) NOT NULL DEFAULT 'GOOGLE_SEARCH'",
+        "full_time_summer_availability": "BOOLEAN NOT NULL DEFAULT 1",
+        "spring_summer_combined_availability": "BOOLEAN NOT NULL DEFAULT 1",
+        "application_preferences_confirmed_at": "DATETIME",
+    },
+    "resume_profiles": {
+        "github_evidence_json": "JSON NOT NULL DEFAULT '[]'",
+    },
+    "application_answer_registry": {},
+    "application_sessions": {
+        "portal_detection_evidence_json": "JSON NOT NULL DEFAULT '[]'",
+        "adapter_diagnostics_json": "JSON NOT NULL DEFAULT '{}'",
+        "adapter_version": "VARCHAR(40) NOT NULL DEFAULT ''",
+        "company_policy_key": "VARCHAR(80) NOT NULL DEFAULT 'GENERIC'",
+        "assessment_type": "VARCHAR(60) NOT NULL DEFAULT ''",
+        "resume_filename": "VARCHAR(320) NOT NULL DEFAULT ''",
+        "resume_download_url": "TEXT NOT NULL DEFAULT ''",
+        "portfolio_version_id": "INTEGER",
+        "portfolio_filename": "VARCHAR(320) NOT NULL DEFAULT ''",
+        "portfolio_download_url": "TEXT NOT NULL DEFAULT ''",
+        "selected_projects_json": "JSON NOT NULL DEFAULT '[]'",
+        "generated_experience_text": "TEXT NOT NULL DEFAULT ''",
+        "selected_skills_json": "JSON NOT NULL DEFAULT '[]'",
+        "skill_match_reasons_json": "JSON NOT NULL DEFAULT '{}'",
+        "project_match_reasons_json": "JSON NOT NULL DEFAULT '{}'",
+        "selection_warnings_json": "JSON NOT NULL DEFAULT '[]'",
     },
     "generated_resumes": {
+        "resume_target": "VARCHAR(80) NOT NULL DEFAULT 'recommended'",
         "selected_skills": "JSON NOT NULL DEFAULT '[]'",
         "skill_categories": "JSON NOT NULL DEFAULT '[]'",
         "job_skill_matches": "JSON NOT NULL DEFAULT '[]'",
         "skill_verification": "JSON NOT NULL DEFAULT '{}'",
+        "compiled_pdf": "BLOB",
+        "compiled_pdf_at": "DATETIME",
+        "source_input_hash": "VARCHAR(64) NOT NULL DEFAULT ''",
+        "active_generation_owner": "VARCHAR(320)",
     },
 }
 
@@ -212,6 +304,10 @@ OWNER_TABLES = (
     "target_companies",
     "target_search_runs",
     "search_runs",
+    "search_run_jobs",
+    "application_profiles",
+    "application_answer_registry",
+    "application_sessions",
 )
 
 
@@ -250,15 +346,31 @@ def _backfill_job_lifecycle() -> None:
                 """
             )
         )
+        deadline_expression = (
+            "DATE(expires_at)"
+            if engine.dialect.name == "sqlite"
+            else "CAST(expires_at AS DATE)"
+        )
         connection.execute(
             text(
-                """
+                f"""
                 UPDATE jobs
-                SET application_deadline = CAST(expires_at AS DATE)
+                SET application_deadline = {deadline_expression}
                 WHERE application_deadline IS NULL AND expires_at IS NOT NULL
                 """
             )
         )
+        if engine.dialect.name == "sqlite":
+            connection.execute(
+                text(
+                    """
+                    UPDATE jobs
+                    SET application_deadline = DATE(expires_at)
+                    WHERE application_deadline IS NOT NULL
+                      AND TYPEOF(application_deadline) != 'text'
+                    """
+                )
+            )
         connection.execute(
             text(
                 """
@@ -296,15 +408,40 @@ def _consolidate_primary_identity() -> None:
         return
     legacy_ids = {
         "primary-user",
-        *settings.authorized_email_set,
+        *(email for email in settings.authorized_email_set if email != JOSHUA_EMAIL),
         primary_user_id,
     }
     with SessionLocal() as db:
+        joshua_legacy = db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == JOSHUA_EMAIL
+        ))
+        joshua_profile = db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == JOSHUA_USER_ID
+        ))
+        if joshua_legacy:
+            if joshua_profile:
+                # The UUID-backed profile is authoritative. This legacy row may
+                # already have been polluted by the former single-user seed.
+                db.delete(joshua_legacy)
+            else:
+                joshua_legacy.user_id = JOSHUA_USER_ID
+        db.execute(
+            GeneratedResume.__table__.update()
+            .where(GeneratedResume.user_id == JOSHUA_EMAIL)
+            .values(user_id=JOSHUA_USER_ID)
+        )
+        db.execute(
+            GeneratedPortfolio.__table__.update()
+            .where(GeneratedPortfolio.user_id == JOSHUA_EMAIL)
+            .values(user_id=JOSHUA_USER_ID)
+        )
+        db.flush()
         profiles = list(
             db.scalars(
                 select(ResumeProfile)
                 .where(ResumeProfile.user_id.in_(legacy_ids))
                 .order_by(
+                    (ResumeProfile.user_id == primary_user_id).desc(),
                     (ResumeProfile.email == settings.resume_email).desc(),
                     ResumeProfile.id.asc(),
                 )
@@ -333,6 +470,7 @@ def _consolidate_primary_identity() -> None:
             "coursework_json",
             "certifications_json",
             "languages_json",
+            "language_credentials_json",
             "forbidden_claims_json",
         )
         for duplicate in profiles[1:]:
@@ -369,15 +507,24 @@ def _consolidate_primary_identity() -> None:
             .where(GeneratedResume.user_id.in_(legacy_ids - {primary_user_id}))
             .values(user_id=primary_user_id)
         )
+        db.execute(
+            GeneratedPortfolio.__table__.update()
+            .where(GeneratedPortfolio.user_id.in_(legacy_ids - {primary_user_id}))
+            .values(user_id=primary_user_id)
+        )
         for model in (
             UserProfile,
             Job,
             Application,
+            ApplicationProfile,
+            ApplicationAnswerRegistry,
+            ApplicationSession,
             Notification,
             CompanySource,
             TargetCompany,
             TargetSearchRun,
             SearchRun,
+            SearchRunJob,
         ):
             db.execute(
                 model.__table__.update()
@@ -388,8 +535,32 @@ def _consolidate_primary_identity() -> None:
         db.commit()
 
 
+def _seed_company_portal_registry() -> None:
+    with SessionLocal() as db:
+        for entry in COMPANY_PORTAL_REGISTRY:
+            record = db.scalar(
+                select(CompanyPortalRegistry).where(
+                    CompanyPortalRegistry.company_id == entry["company_id"]
+                )
+            )
+            if record is None:
+                record = CompanyPortalRegistry(company_id=entry["company_id"])
+                db.add(record)
+            record.company_name = entry["company_name"]
+            record.known_domains_json = list(entry["known_domains"])
+            record.portal_type = entry["portal_type"]
+            record.application_adapter = entry["application_adapter"]
+            record.company_specific_rules_json = dict(entry["company_specific_rules"])
+            record.resume_behavior = "JOB_SPECIFIC"
+            record.skills_behavior = "JOB_SPECIFIC_INDIVIDUAL"
+            record.known_question_aliases_json = dict(entry["known_question_aliases"])
+            record.support_status = entry["support_status"]
+        db.commit()
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _add_missing_columns()
     _backfill_job_lifecycle()
     _consolidate_primary_identity()
+    _seed_company_portal_registry()

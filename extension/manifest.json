@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Internship Radar AI Apply Agent",
+  "version": "2.4.0",
+  "description": "Local-first, privacy-aware semantic application assistance for Internship Radar.",
+  "permissions": ["storage", "sidePanel", "tabs", "downloads", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://your-app.vercel.app/*",
+    "https://your-app.vercel.app/*",
+    "http://localhost:3000/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://127.0.0.1:11434/*", "http://localhost:11434/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Internship Radar AI Apply Agent"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://your-app.vercel.app/*",
+        "https://your-app.vercel.app/*",
+        "http://localhost:3000/*"
+      ],
+      "js": ["web-bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; frame-ancestors 'none'"
+  }
+}

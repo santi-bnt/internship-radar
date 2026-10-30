@@ -25,6 +25,11 @@ def same_job(left: Any, right: Any) -> bool:
     if left_requisition and left_requisition == right_requisition and same_company:
         return True
 
+    # Google's recruiting cycles reuse titles and locations, but have distinct
+    # requisitions. Never collapse a new fall posting into a closed early cycle.
+    if same_company and normalized_token(value(left, "company")) == "google" and left_external and right_external and left_external != right_external:
+        return False
+
     left_apply = canonicalize_url(value(left, "apply_url", "") or "")
     right_apply = canonicalize_url(value(right, "apply_url", "") or "")
     if left_apply and right_apply and left_apply == right_apply:

@@ -42,3 +42,5 @@ services:
         value: "false"
       - key: DEMO_FEED_ENABLED
         value: "true"
+      - key: PUBLIC_DEMO_MODE
+        value: "true"

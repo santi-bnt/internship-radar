@@ -47,6 +47,10 @@ NON_OFFICIAL_HOSTS = {
     "github.com",
     "www.github.com",
     "raw.githubusercontent.com",
+    "simplify.jobs",
+    "www.simplify.jobs",
+    "applyguy.ai",
+    "www.applyguy.ai",
 }
 
 
@@ -208,6 +212,24 @@ async def verify_official_application(
             "verified",
             "http_status",
             f"Official page returned HTTP {response.status_code}.",
+            final_url,
+            now,
+        )
+    if response.status_code == 403:
+        return VerificationResult(
+            "unknown",
+            "partially_verified",
+            "access_restricted",
+            "The official page restricted automated access; HTTP 403 alone does not mean the job expired.",
+            final_url,
+            now,
+        )
+    if response.status_code == 429:
+        return VerificationResult(
+            "unknown",
+            "partially_verified",
+            "rate_limited",
+            "The official page rate-limited verification; retry later.",
             final_url,
             now,
         )

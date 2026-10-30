@@ -1,5 +1,8 @@
+import asyncio
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+
+import httpx
 
 from app.services.classification import (
     classify_remote,
@@ -84,7 +87,9 @@ def test_unconfirmed_external_listing_needs_verification(profile, base_job):
 
 
 def test_verified_official_job_can_apply_today(profile, base_job):
-    result = analyze_job(base_job, profile)
+    # A verified, recent opening is actionable; fixed fixture dates age over time.
+    now = datetime.now(timezone.utc)
+    result = analyze_job({**base_job, "posted_at": now, "first_seen_at": now, "last_verified_at": now}, profile)
     assert result.recommendation == "Apply Today"
 
 
@@ -135,6 +140,45 @@ def test_embedded_jobs_uses_official_application_url():
     normalized = adapter.normalize_job(raw)
     assert normalized.apply_url == raw["official_apply_url"]
     assert normalized.original_source_url == raw["embedded_url"]
+
+
+def test_embedded_jobs_keeps_listings_when_details_are_rate_limited(monkeypatch):
+    adapter = EmbeddedJobsAdapter("EmbeddedJobs", "internships", "https://embedded.jobs")
+    summaries = [
+        {
+            "external_id": str(index),
+            "title": f"Embedded Software Intern {index}",
+            "company": "Example",
+            "location": "Remote",
+            "country": "Remote",
+            "description": "Embedded internship",
+            "embedded_url": f"https://embedded.jobs/job/{index}",
+        }
+        for index in (1, 2)
+    ]
+
+    async def fetch_jobs():
+        return summaries
+
+    detail_calls = 0
+
+    async def fetch_details(summary):
+        nonlocal detail_calls
+        detail_calls += 1
+        request = httpx.Request("GET", summary["embedded_url"])
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("rate limited", request=request, response=response)
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(adapter, "fetch_jobs", fetch_jobs)
+    monkeypatch.setattr(adapter, "fetch_job_details", fetch_details)
+    monkeypatch.setattr("app.sources.embedded_jobs.asyncio.sleep", no_sleep)
+    jobs = asyncio.run(adapter.collect())
+    assert len(jobs) == 2
+    assert detail_calls == 1
+    assert all(job.verification_method == "embedded_jobs_listing_rate_limited" for job in jobs)
 
 
 def test_general_careers_redirect_is_not_an_open_job():

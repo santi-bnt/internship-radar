@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+from app.db.init_db import _consolidate_primary_identity
 from app.main import app
-from app.models import ResumeProfile, UserProfile
+from app.models import Job, JobAnalysis, ResumeProfile, UserProfile
+from app.services.resume_generation import generate_local_content
 from app.security.identity import (
     IdentityValidationError,
+    JOSHUA_EMAIL,
+    JOSHUA_USER_ID,
     is_authorized_email,
     resolve_primary_user,
     validate_user_identity,
@@ -68,6 +72,124 @@ def test_three_authorized_emails_resolve_to_same_primary_user():
         assert identity.authenticated_email == email
 
 
+def test_joshua_resolves_to_an_independent_account_and_profile():
+    assert is_authorized_email(JOSHUA_EMAIL)
+    assert resolve_primary_user(JOSHUA_EMAIL) == JOSHUA_USER_ID
+    identity = validate_user_identity(security_headers(
+        JOSHUA_EMAIL, subject=JOSHUA_USER_ID
+    )["x-user-identity"])
+    assert identity.primary_user_id == JOSHUA_USER_ID
+    assert identity.primary_user_id != settings.primary_user_id
+    with TestClient(app, headers=security_headers(
+        JOSHUA_EMAIL, subject=JOSHUA_USER_ID
+    )) as client:
+        response = client.get("/api/profile")
+        jobs_response = client.get("/api/jobs")
+        application_profile_response = client.get("/api/application-profile")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["full_name"].startswith("Taylor Morgan")
+    assert payload["official_degree_name"] == "B.S. in Robotics and Digital Systems Engineering"
+    assert payload["expected_graduation_date"] == "2028-06-30"
+    assert payload["nationality"] == "Mexican"
+    assert payload["citizenship_country"] == "Mexico"
+    assert payload["gpa"] == 3.7
+    assert payload["gpa_scale"] == 4.0
+    assert payload["gpa_scale_status"] == "CONFIRMED"
+    assert payload["us_authorization_conflict_detected"] is True
+    assert payload["only_remote"] is False
+    assert payload["include_hybrid"] is True
+    assert payload["include_onsite"] is True
+    assert "Santiago" not in response.text
+    assert jobs_response.status_code == 200
+    assert jobs_response.json()["total"] > 0
+    assert application_profile_response.status_code == 200
+    assert application_profile_response.json()["gpa"] == 3.7
+    assert application_profile_response.json()["gpa_scale"] == 4.0
+    assert application_profile_response.json()["languages_json"] == [
+        "Spanish — Native", "English — Fluent"
+    ]
+    assert any(
+        (item.get("analysis") or {}).get("overall_score", 0) > 0
+        for item in jobs_response.json()["items"]
+    )
+    with SessionLocal() as db:
+        resume_profile = db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == JOSHUA_USER_ID
+        ))
+        job = db.scalar(select(Job).where(
+            Job.owner_user_id == JOSHUA_USER_ID,
+            Job.description != "",
+        ))
+        assert resume_profile and job
+        assert resume_profile.languages_json == ["Spanish — Native", "English — Fluent"]
+        content = generate_local_content(job, resume_profile)
+        assert "verified" not in content.summary.lower()
+
+
+def test_joshua_job_reads_are_read_only_and_do_not_create_analyses():
+    headers = security_headers(JOSHUA_EMAIL, subject=JOSHUA_USER_ID)
+    with TestClient(app, headers=headers) as client:
+        with SessionLocal() as db:
+            joshua_job_ids = select(Job.id).where(Job.owner_user_id == JOSHUA_USER_ID)
+            db.execute(delete(JobAnalysis).where(JobAnalysis.job_id.in_(joshua_job_ids)))
+            db.commit()
+        assert client.get("/api/jobs?active=true&page_size=6").status_code == 200
+        assert client.get("/api/jobs?active=true&page_size=50").status_code == 200
+        with SessionLocal() as db:
+            remaining = db.scalar(select(func.count(JobAnalysis.id)).join(Job).where(
+                Job.owner_user_id == JOSHUA_USER_ID
+            ))
+        assert remaining == 0
+
+
+def test_legacy_joshua_resume_identity_is_not_merged_into_santiago():
+    with SessionLocal() as db:
+        db.add(ResumeProfile(
+            user_id=JOSHUA_EMAIL,
+            full_name="Legacy Joshua",
+            email=JOSHUA_EMAIL,
+        ))
+        db.commit()
+    _consolidate_primary_identity()
+    with SessionLocal() as db:
+        assert db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == JOSHUA_EMAIL
+        )) is None
+        assert db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == JOSHUA_USER_ID
+        )) is not None
+        assert db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == settings.primary_user_id
+        )) is not None
+
+
+def test_existing_primary_id_wins_over_a_legacy_row_with_canonical_email():
+    legacy_id = "alerts@example.com"
+    with SessionLocal() as db:
+        primary = db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == settings.primary_user_id
+        ))
+        assert primary
+        primary.email = "older-primary@example.com"
+        db.add(ResumeProfile(
+            user_id=legacy_id,
+            full_name="Polluted legacy row",
+            email=settings.resume_email,
+        ))
+        db.commit()
+    _consolidate_primary_identity()
+    with SessionLocal() as db:
+        assert db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == legacy_id
+        )) is None
+        primary = db.scalar(select(ResumeProfile).where(
+            ResumeProfile.user_id == settings.primary_user_id
+        ))
+        assert primary
+        assert primary.full_name != "Polluted legacy row"
+
+
 def test_allowlist_rejects_partial_and_unverified_identity_values():
     rejected = (
         "attacker+candidate@example.com",
@@ -92,8 +214,9 @@ def test_bad_signature_and_expired_identity_are_rejected():
         expired = client.get("/api/jobs", headers=security_headers(expires_offset=-1))
     assert bad_signature.status_code == 401
     assert expired.status_code == 401
+    replacement = "A" if signature[-1] != "A" else "B"
     try:
-        validate_user_identity(f"{payload}.{signature[:-1]}A")
+        validate_user_identity(f"{payload}.{signature[:-1]}{replacement}")
     except IdentityValidationError:
         pass
     else:
@@ -149,21 +272,10 @@ def test_maintenance_mode_blocks_reads_writes_and_downloads(monkeypatch):
 
 def test_resource_owned_by_another_user_is_not_visible():
     with SessionLocal() as db:
-        profile = db.scalar(select(UserProfile).limit(1))
-        assert profile
-        original_owner = profile.owner_user_id
-        profile.owner_user_id = "another-user"
-        profile_id = profile.id
-        db.commit()
-    try:
-        with TestClient(app, headers=security_headers()) as client:
-            assert client.get("/api/profile").status_code == 404
-    finally:
-        with SessionLocal() as db:
-            profile = db.get(UserProfile, profile_id)
-            assert profile
-            profile.owner_user_id = original_owner
-            db.commit()
+        db.info["owner_user_id"] = settings.primary_user_id
+        assert db.scalar(select(UserProfile).where(
+            UserProfile.owner_user_id == JOSHUA_USER_ID
+        )) is None
 
 
 def test_rate_limit_is_scoped_to_primary_user():

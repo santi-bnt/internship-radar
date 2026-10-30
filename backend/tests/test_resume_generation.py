@@ -12,6 +12,7 @@ from app.main import app
 from conftest import security_headers
 from app.models import GeneratedResume, Job, ResumeProfile, UserProfile
 from app.schemas.api import ResumeCertificationItem
+from app.services.research_opportunities import analyze_research_opportunity
 from app.services.resume_generation import (
     ARTIFICIAL_PHRASES,
     CANONICAL_DEGREE,
@@ -21,6 +22,7 @@ from app.services.resume_generation import (
     CANONICAL_GPA,
     CANONICAL_INSTITUTION,
     CANONICAL_LINKEDIN,
+    CANONICAL_LINKEDIN_LABEL,
     CANONICAL_LOCATION,
     CANONICAL_NAME,
     CANONICAL_PHONE,
@@ -32,11 +34,89 @@ from app.services.resume_generation import (
     generate_local_content,
     latex_escape,
     render_latex,
+    resume_filename,
     sanitize_resume_text,
     score_project_for_job,
     validate_generated_resume,
     validate_master_profile,
 )
+
+
+def research_job(description: str = "robotics controls embedded sensing computer vision") -> SimpleNamespace:
+    opportunity = job("Visiting Research Intern", description, "Robotics")
+    opportunity.resume_target = "robotics_research"
+    opportunity.lab = "Robotics Lab"
+    opportunity.supervisor = "Professor"
+    opportunity.research_areas = ["robotics", "controls"]
+    opportunity.opportunity_type = "research"
+    return opportunity
+
+
+def test_robotics_research_ranks_physical_projects_above_generic_web():
+    content = generate_local_content(research_job(), profile())
+    names = [item.name for item in content.projects]
+    assert "MATT Web-Controlled Writing Robot" in names[:3]
+    assert "FreeRTOS Event-Driven System" in names[:3]
+    assert "Internship Radar - AI Resume Tailoring Platform" not in names[:3]
+    assert content.section_order[0] == "education"
+
+
+def test_software_engineering_ranking_is_unchanged_by_research_target():
+    content = generate_local_content(software_job(), profile())
+    assert content.classification == "Software Engineering"
+    assert content.projects[0].name == "Internship Radar - AI Resume Tailoring Platform"
+
+
+def test_research_opportunity_cannot_create_unverified_ros_skill():
+    candidate = profile()
+    candidate.skills_json = [skill for skill in candidate.skills_json if skill != "ROS"]
+    opportunity = research_job("ROS SLAM CUDA Gazebo robotics research")
+    content = generate_local_content(opportunity, candidate)
+    assert "ROS" not in content.selected_skills
+    assert "ROS" not in render_latex(content, candidate)
+
+
+def test_robotics_research_filename_is_sanitized_and_compact():
+    filename = resume_filename("Alex Rivera", "University of Washington", "robotics_research", variant="MACS")
+    assert filename == "Alex_Rivera_UW_MACS_Research_CV.pdf"
+    assert len(filename) <= 124
+
+
+def test_professor_focus_changes_project_ranking():
+    candidate = profile()
+    candidate.projects_json.append(project(
+        "Python Camera Perception System",
+        ["Python", "Computer Vision", "OpenCV"],
+        f"{CANONICAL_GITHUB}/camera-perception",
+        "camera perception",
+    ))
+    manipulation = research_job("robotic manipulation tactile sensing motor controls")
+    vision = research_job("robot learning perception computer vision image processing")
+    manipulation_names = [item.name for item in generate_local_content(manipulation, candidate).projects]
+    vision_names = [item.name for item in generate_local_content(vision, candidate).projects]
+    assert manipulation_names != vision_names
+    assert vision_names.index("Python Camera Perception System") < manipulation_names.index("Python Camera Perception System")
+
+
+def test_base_research_analysis_works_without_professor_or_lab():
+    opportunity = research_job("")
+    opportunity.supervisor = ""
+    opportunity.lab = ""
+    result = analyze_research_opportunity(profile(), opportunity)
+    assert result["recommended_projects"]
+    assert result["verified_matches"]
+    assert result["confidence"] > 0
+
+
+def test_similarity_analysis_does_not_mutate_previous_resume():
+    opportunity = research_job("robotics embedded controls")
+    content = generate_local_content(opportunity, profile())
+    snapshot = deepcopy(content.model_dump())
+    previous = SimpleNamespace(id=77, tailored_content_json=deepcopy(snapshot))
+    result = analyze_research_opportunity(profile(), opportunity, [previous])
+    assert result["similarity"] >= 85
+    assert result["similar_resume_id"] == 77
+    assert previous.tailored_content_json == snapshot
 from app.services.resume_skills import (
     build_verified_skill_registry,
     canonicalize_skill,
@@ -59,7 +139,7 @@ SKILLS = [
     "Concurrent Programming", "Multithreaded Programming",
     "Hardware/Software Integration", "Hardware Debugging", "Software Debugging",
     "Software Validation", "SQL", "Backend Development", "Full-Stack Development",
-    "Digital Logic", "FPGA Design",
+    "Intel MAX 10", "Digital Logic", "FPGA Design",
 ]
 
 
@@ -73,6 +153,182 @@ def project(name: str, technologies: list[str], url: str, marker: str) -> dict:
             f"Tested {marker} interfaces to isolate implementation faults and validate consistent behavior across the project's principal technical workflows.",
         ],
     }
+
+
+def test_google_solutions_resume_uses_verified_software_evidence():
+    from app.services.resume_generation import classify_job, generate_local_content, score_project_for_job
+    from app.services.scoring import _skill_matches
+
+    candidate = profile()
+    candidate.skills_json = [skill for skill in candidate.skills_json if skill != "Java"]
+    job = SimpleNamespace(
+        title="Customer and Partner Solutions Engineering Intern, BS/MS, Summer 2027",
+        company="Google", area="Solutions Engineering", description=(
+            "Build technical integrations and automation, troubleshoot partner issues, "
+            "scope reusable solutions and support developers using RESTful APIs, Python, "
+            "data pipelines and dashboards."
+        ),
+        requirements="", preferred_qualifications="Python, C, C++, Java, JSON, SDKs and Webhooks",
+        resume_target="recommended", application_type="STANDARD_JOB",
+    )
+    assert classify_job(job) == "Solutions / API Integration"
+    matched, _, missing, _ = _skill_matches(job, candidate)
+    assert "java" not in matched
+    assert "java" in missing
+    assert "python" in matched and "c++" in matched
+    content = generate_local_content(job, candidate)
+    names = [item.name for item in content.projects]
+    assert names[0] == "Internship Radar - AI Resume Tailoring Platform"
+    assert "SkiliAir Air Quality Monitoring System" in names[:3]
+    assert "Java" not in content.selected_skills
+    assert "SDKs" not in content.selected_skills
+    assert "Webhooks" not in content.selected_skills
+    assert "Web & APIs" in [group.name for group in content.skill_categories]
+    assert "software services" in content.summary
+    scores = {item["name"]: item["score"] for item in content.tailoring_trace["project_ranking"]}
+    assert scores["SkiliAir Air Quality Monitoring System"] > scores["Intel MAX 10 Robotic Arm Controller"]
+
+
+def test_google_ranking_with_seeded_project_facts():
+    from app.services.seed import INTERNSHIP_RADAR_PROJECT, VERIFIED_RESUME_PROJECTS
+    candidate = profile()
+    candidate.projects_json = deepcopy(VERIFIED_RESUME_PROJECTS) + [deepcopy(INTERNSHIP_RADAR_PROJECT)]
+    candidate.skills_json = sorted({tech for item in candidate.projects_json for tech in item["technologies"]})
+    opportunity = SimpleNamespace(
+        title="Customer and Partner Solutions Engineering Intern, BS/MS, Summer 2027",
+        company="Google", area="Solutions Engineering", resume_target="recommended",
+        application_type="STANDARD_JOB", requirements="", preferred_qualifications="Python C C++ Java JSON SDKs Webhooks",
+        description="Build technical integrations, automation, REST APIs, data pipelines and dashboards; troubleshoot partner issues.",
+    )
+    content = generate_local_content(opportunity, candidate)
+    assert [item["name"] for item in content.tailoring_trace["project_ranking"][:5]] == [
+        "Internship Radar - AI Resume Tailoring Platform",
+        "SkiliAir Air Quality Monitoring System",
+        "DC Motor Position Control System with WebXR Interface",
+        "MATT Web-Controlled Writing Robot",
+        "FreeRTOS Event-Driven System",
+    ]
+    assert "Java" not in content.selected_skills
+
+
+def test_embedded_job_keeps_firmware_projects_ahead_of_web():
+    from app.services.resume_generation import _select_projects
+    job = SimpleNamespace(title="Embedded Firmware Intern", description="C FreeRTOS microcontrollers UART interrupts embedded firmware", requirements="", preferred_qualifications="", resume_target="recommended")
+    names = [item["name"] for item in _select_projects(job, profile(), "Embedded / Firmware", 7)]
+    assert names.index("FreeRTOS Event-Driven System") < names.index("Internship Radar - AI Resume Tailoring Platform")
+    assert names.index("MATT Web-Controlled Writing Robot") < names.index("Internship Radar - AI Resume Tailoring Platform")
+    content = generate_local_content(job, profile())
+    assert {"RTOS", "Protocols", "Embedded Systems"} <= {group.name for group in content.skill_categories}
+    assert "firmware" in content.summary
+
+
+def test_new_santiago_projects_are_available_to_role_specific_resume_selection():
+    from app.services.resume_generation import _select_projects
+    from app.services.seed import INTERNSHIP_RADAR_PROJECT, VERIFIED_RESUME_PROJECTS
+
+    candidate = profile()
+    candidate.projects_json = deepcopy(VERIFIED_RESUME_PROJECTS) + [deepcopy(INTERNSHIP_RADAR_PROJECT)]
+    candidate.skills_json = sorted({
+        technology
+        for project_item in candidate.projects_json
+        for technology in project_item.get("technologies", [])
+    })
+
+    software_job = SimpleNamespace(
+        title="Software Engineering Intern",
+        description="Build a browser-based coding platform using TypeScript and offline tools.",
+        requirements="Programming tools, local execution, and persistent learning progress.",
+        preferred_qualifications="",
+        resume_target="recommended",
+    )
+    software_names = [
+        item["name"]
+        for item in _select_projects(software_job, candidate, "Software Engineering", 4)
+    ]
+    assert "Forge the Code" in software_names
+
+    embedded_job = SimpleNamespace(
+        title="Embedded Bluetooth Firmware Intern",
+        description="ESP32, C++, BLE, HID peripherals, and device integration.",
+        requirements="",
+        preferred_qualifications="",
+        resume_target="recommended",
+    )
+    embedded_names = [
+        item["name"]
+        for item in _select_projects(embedded_job, candidate, "Embedded / Firmware", 4)
+    ]
+    assert "BLE Virtual Mouse" in embedded_names
+
+    vision_job = SimpleNamespace(
+        title="Computer Vision Intern",
+        description="Python, OpenCV, image processing, and visual classification.",
+        requirements="",
+        preferred_qualifications="",
+        resume_target="recommended",
+    )
+    vision_names = [
+        item["name"]
+        for item in _select_projects(vision_job, candidate, "Computer Vision", 4)
+    ]
+    assert vision_names[0] == "Fruit Freshness Detector"
+
+    all_projects = [
+        item["name"]
+        for item in _select_projects(software_job, candidate, "Software Engineering", 20)
+    ]
+    assert "C.U.T.Y Desktop Companion Robot" in all_projects
+    assert "Fruit Freshness Detector" in all_projects
+    assert "ESP32 Discrete PID Controller with Analog Reference" in all_projects
+    assert "DC Motor Position Control System with WebXR Interface" in all_projects
+
+    from app.services.resume_generation import score_project_for_job
+    from app.services.seed import VERIFIED_RESUME_PROJECTS
+    control_projects = {
+        item["name"]: item
+        for item in VERIFIED_RESUME_PROJECTS
+        if item["name"] in {
+            "ESP32 Discrete PID Controller with Analog Reference",
+            "DC Motor Position Control System with WebXR Interface",
+        }
+    }
+    discrete_pid_job = "ESP32 discrete PID control using analog reference ADC, DAC, integral and derivative terms"
+    motor_position_job = "ESP32 DC motor position control using encoder feedback, BTS7960, PWM, MQTT and WebXR"
+    assert score_project_for_job(
+        control_projects["ESP32 Discrete PID Controller with Analog Reference"],
+        "Embedded / Firmware",
+        discrete_pid_job,
+    ) > score_project_for_job(
+        control_projects["DC Motor Position Control System with WebXR Interface"],
+        "Embedded / Firmware",
+        discrete_pid_job,
+    )
+    assert score_project_for_job(
+        control_projects["DC Motor Position Control System with WebXR Interface"],
+        "Embedded / Firmware",
+        motor_position_job,
+    ) > score_project_for_job(
+        control_projects["ESP32 Discrete PID Controller with Analog Reference"],
+        "Embedded / Firmware",
+        motor_position_job,
+    )
+
+
+def test_seeded_verified_registry_excludes_legacy_java_claim():
+    init_db()
+    with SessionLocal() as db:
+        seed_profile_and_sources(db)
+        current = db.query(ResumeProfile).first()
+        assert current is not None
+        assert "Java" not in build_verified_skill_registry(current)
+
+
+def test_graduation_mm_yy_only_when_posting_requests_it():
+    from app.services.resume_generation import _job_education
+    ordinary = SimpleNamespace(description="Software engineering internship", requirements="", preferred_qualifications="")
+    formatted = SimpleNamespace(description="List your expected graduation date in MM/YY format", requirements="", preferred_qualifications="")
+    assert _job_education(profile(), ordinary)["graduation"] == CANONICAL_GRADUATION
+    assert _job_education(profile(), formatted)["graduation"] == "Expected Graduation: 06/28"
 
 
 def profile() -> SimpleNamespace:
@@ -104,7 +360,7 @@ def profile() -> SimpleNamespace:
                     "SQLAlchemy", "Pydantic", "OpenAI API", "Jinja2", "LaTeX",
                     "Tectonic", "Auth.js", "Git", "Docker",
                 ],
-                "repository_url": "https://github.com/example-org/internship-radar",
+                "repository_url": "https://github.com/example-candidate/Intership_radar",
                 "live_url": "",
                 "is_public": True,
                 "is_resume_eligible": True,
@@ -114,44 +370,44 @@ def profile() -> SimpleNamespace:
                     "Developed authenticated job tracking, resume versioning, PDF preview and download, LaTeX source viewing, and job-specific project selection.",
                 ],
             },
-            project("Autonomous Lab Rover", ["C", "C++", "UART", "PWM"], CANONICAL_GITHUB, "robotic"),
-            project("Embedded Telemetry Gateway", ["C", "FreeRTOS", "Tasks", "Queues"], CANONICAL_GITHUB, "real-time"),
-            project("Environmental Sensor Dashboard", ["Python", "Flask", "REST APIs", "MySQL"], f"{CANONICAL_GITHUB}/environmental-sensor-dashboard", "monitoring"),
-            project("Market Simulation Engine", ["C++", "Data Structures", "Algorithms", "File I/O"], f"{CANONICAL_GITHUB}/market-simulation-engine", "matching"),
+            project("MATT Web-Controlled Writing Robot", ["C", "C++", "UART", "PWM"], CANONICAL_GITHUB, "robotic"),
+            project("FreeRTOS Event-Driven System", ["C", "FreeRTOS", "Tasks", "Queues"], CANONICAL_GITHUB, "real-time"),
+            project("SkiliAir Air Quality Monitoring System", ["Python", "Flask", "REST APIs", "MySQL"], f"{CANONICAL_GITHUB}/raspberrypi-air-quality-monitor", "monitoring"),
+            project("Stock Exchange Matching Engine", ["C++", "Data Structures", "Algorithms", "File I/O"], f"{CANONICAL_GITHUB}/trading-simulator-v", "matching"),
             {
-                "name": "Route Optimization Engine",
+                "name": "Königsberg Graph Game",
                 "technologies": [
                     "C++", "Object-Oriented Programming", "Graph Algorithms",
                     "Algorithms", "Path Validation", "Data Structures", "Testing",
                 ],
-                "github_url": f"{CANONICAL_GITHUB}/route-optimization-engine",
+                "github_url": f"{CANONICAL_GITHUB}/Konigsberg-game",
                 "bullets": [
                     "Developed a modular C++ graph application modeling locations, bridges, vertices, edges, and valid movement paths using object-oriented components.",
                     "Implemented graph traversal and path-validation algorithms to evaluate available routes and maintain consistent application state.",
                     "Tested valid and invalid movement sequences to verify graph constraints, path updates, and behavior across multiple configurations.",
                 ],
             },
-            project("FPGA Signal Processor", ["FPGA", "Verilog", "SystemVerilog", "PWM"], f"{CANONICAL_GITHUB}/fpga-signal-processor", "digital"),
+            project("Intel MAX 10 Robotic Arm Controller", ["FPGA", "Verilog", "SystemVerilog", "PWM"], f"{CANONICAL_GITHUB}/Verilog", "digital"),
         ],
         coursework_json=[
             {
-                "name": "Data Structures with Python",
-                "institution": "Example Online University",
-                "issued": "2025",
+                "name": "Python Data Structures",
+                "institution": "University of Michigan",
+                "issued": "September 2024",
                 "areas": ["Python", "Data Structures", "Software Engineering"],
                 "priority": "normal",
             },
             {
-                "name": "Building Web APIs with Python",
-                "institution": "Example Online University",
-                "issued": "2025",
+                "name": "Using Python to Access Web Data",
+                "institution": "University of Michigan",
+                "issued": "November 2024",
                 "areas": ["Python", "Web Data", "APIs", "Backend"],
                 "priority": "normal",
             },
             {
-                "name": "Python Programming Fundamentals",
-                "institution": "Example Online University",
-                "issued": "2024",
+                "name": "Programming for Everybody (Getting Started with Python)",
+                "institution": "University of Michigan",
+                "issued": "September 2024",
                 "areas": ["Python Fundamentals"],
                 "priority": "low",
             },
@@ -159,8 +415,9 @@ def profile() -> SimpleNamespace:
         certifications_json=[],
         languages_json=[
             "Spanish — Native",
-            "English — Professional",
-            "Portuguese — Basic",
+            "English — Fluent",
+            "French — Basic",
+            "German — Basic",
         ],
         forbidden_claims_json=["C#", ".NET", "MCP", "AWS certification"],
     )
@@ -240,23 +497,24 @@ def test_canonical_degree_is_always_used():
     content = generate_local_content(embedded_job(), profile())
     assert content.education.degree == CANONICAL_DEGREE
     assert CANONICAL_STUDENT_TITLE in content.headline
-    assert "Computer Engineering student" in content.summary
+    assert "Robotics and Digital Systems Engineering student" in content.summary
 
 
 def test_core_languages_are_always_included_and_basic_languages_are_contextual():
     standard = generate_local_content(software_job(), profile())
-    assert standard.languages == ["Spanish - Native", "English - Professional"]
+    assert standard.languages == ["Spanish - Native", "English - Fluent"]
 
-    portuguese_role = job(
+    french_role = job(
         "Software Engineering Intern",
-        "Build Python services with a team where Portuguese language is helpful.",
+        "Build Python services with a team in France; French language is helpful.",
     )
-    tailored = generate_local_content(portuguese_role, profile())
+    tailored = generate_local_content(french_role, profile())
     assert tailored.languages == [
         "Spanish - Native",
-        "English - Professional",
-        "Portuguese - Basic",
+        "English - Fluent",
+        "French - Basic",
     ]
+    assert "German - Basic" not in tailored.languages
 
 
 def test_languages_render_as_a_real_resume_section():
@@ -264,6 +522,38 @@ def test_languages_render_as_a_real_resume_section():
     assert r"\sectionheading{Languages}" in latex
     assert "Spanish" in latex
     assert "English" in latex
+
+
+def test_every_resume_target_uses_projects_as_the_section_heading():
+    base_content = generate_local_content(software_job(), profile())
+    for application_type, classification in (
+        ("STANDARD_JOB", "Software Engineering"),
+        ("TALENT_COMMUNITY", "Talent Community"),
+        ("KOSPIE_PROGRAM", "KOSPIE / Germany Engineering"),
+        ("STANDARD_JOB", "Robotics Research"),
+    ):
+        content = base_content.model_copy(deep=True)
+        content.application_type = application_type
+        content.classification = classification
+        latex = render_latex(content, profile())
+        assert r"\sectionheading{Projects}" in latex
+        assert r"\sectionheading{Project Experience}" not in latex
+        assert r"\sectionheading{Engineering Projects}" not in latex
+        assert r"\sectionheading{Robotics and Embedded Projects}" not in latex
+
+
+def test_santiago_linkedin_is_canonicalized_in_visible_and_hidden_latex():
+    candidate = profile()
+    candidate.linkedin_url = (
+        "https://www.linkedin.com/in/example-candidate/"
+    )
+    latex = render_latex(generate_local_content(software_job(), candidate), candidate)
+
+    assert (
+        rf"\href{{{CANONICAL_LINKEDIN}}}{{{CANONICAL_LINKEDIN_LABEL}}}"
+        in latex
+    )
+    assert "example-legacy-candidate" not in latex
 
 
 def test_inconsistent_degree_name_is_rejected():
@@ -296,8 +586,8 @@ def test_seed_repairs_legacy_resume_identity():
             "institution": CANONICAL_INSTITUTION,
             "degree": CANONICAL_DEGREE,
             "location": "Mexico",
-            "graduation": "2029",
-            "gpa": "3.7/4.0",
+            "graduation": "2028",
+            "gpa": "93.05/100.0",
             "coursework": [],
         }]
         db.commit()
@@ -327,10 +617,62 @@ def test_seed_repairs_legacy_resume_identity():
         assert settings.notification_email not in rendered
 
 
+def test_linkedin_migration_updates_only_santiago_candidate_profiles():
+    import importlib.util
+    from pathlib import Path
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    path = (
+        Path(__file__).parents[1]
+        / "alembic"
+        / "versions"
+        / "20260914_25_santiago_linkedin.py"
+    )
+    spec = importlib.util.spec_from_file_location("linkedin_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(migration)
+
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as connection:
+        for table_name, owner_column in (
+            ("user_profiles", "owner_user_id"),
+            ("resume_profiles", "user_id"),
+            ("application_profiles", "owner_user_id"),
+        ):
+            connection.exec_driver_sql(
+                f"CREATE TABLE {table_name} ("
+                f"{owner_column} VARCHAR(320) PRIMARY KEY, "
+                "full_name VARCHAR(160), linkedin_url TEXT)"
+            )
+            connection.exec_driver_sql(
+                f"INSERT INTO {table_name} VALUES "
+                "('santiago', 'Alex Rivera', 'https://old.example/santiago'), "
+                "('joshua', 'Taylor Morgan', 'https://www.linkedin.com/in/example-candidate/')"
+            )
+
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+
+        for table_name in (
+            "user_profiles", "resume_profiles", "application_profiles",
+        ):
+            rows = connection.exec_driver_sql(
+                f"SELECT full_name, linkedin_url FROM {table_name} ORDER BY full_name"
+            ).all()
+            assert rows == [
+                ("Taylor Morgan", "https://www.linkedin.com/in/example-candidate/"),
+                ("Alex Rivera", CANONICAL_LINKEDIN),
+            ]
+
+
 def test_artificial_phrases_are_rejected():
     content = generate_local_content(embedded_job(), profile())
     content.summary = (
-        "Computer Engineering student with documented application behavior "
+        "Robotics and Digital Systems Engineering student with documented application behavior "
         "across embedded systems, firmware, interfaces, and robotic projects. Developed C/C++ "
         "software using FreeRTOS, UART, SPI, Linux, and testing for multidisciplinary academic "
         "hardware platforms and integrated control applications."
@@ -349,19 +691,19 @@ def test_skill_categories_never_have_one_item():
 
 def test_embedded_project_priority():
     content = generate_local_content(embedded_job(), profile())
-    assert [item.name for item in content.projects] == [
-        "Embedded Telemetry Gateway",
-        "Autonomous Lab Rover",
-        "FPGA Signal Processor",
+    assert [item.name for item in content.projects[:3]] == [
+        "FreeRTOS Event-Driven System",
+        "MATT Web-Controlled Writing Robot",
+        "Intel MAX 10 Robotic Arm Controller",
     ]
 
 
 def test_software_project_priority():
     content = generate_local_content(software_job(), profile())
-    assert [item.name for item in content.projects] == [
+    assert [item.name for item in content.projects[:3]] == [
         "Internship Radar - AI Resume Tailoring Platform",
-        "Market Simulation Engine",
-        "Route Optimization Engine",
+        "Stock Exchange Matching Engine",
+        "Königsberg Graph Game",
     ]
 
 
@@ -378,17 +720,17 @@ def test_data_alone_does_not_trigger_maps_classification():
 
 def test_maps_project_order_prioritizes_graph_relevance():
     content = generate_local_content(maps_job(), profile())
-    assert [item.name for item in content.projects] == [
-        "Route Optimization Engine",
-        "Environmental Sensor Dashboard",
+    assert [item.name for item in content.projects[:3]] == [
+        "Königsberg Graph Game",
+        "SkiliAir Air Quality Monitoring System",
         "Internship Radar - AI Resume Tailoring Platform",
     ]
 
 
 def test_stock_project_cannot_win_from_technology_count_alone():
     current_profile = profile()
-    graph = next(item for item in current_profile.projects_json if item["name"] == "Route Optimization Engine")
-    stock = next(item for item in current_profile.projects_json if item["name"] == "Market Simulation Engine")
+    graph = next(item for item in current_profile.projects_json if "Graph Game" in item["name"])
+    stock = next(item for item in current_profile.projects_json if item["name"].startswith("Stock"))
     requirements = maps_job().description
     assert score_project_for_job(
         graph, "Maps / Routing / Geospatial", requirements
@@ -411,7 +753,7 @@ def test_maps_content_does_not_invent_gis_experience():
 def test_maps_headline_and_skill_groups_are_bounded():
     content = generate_local_content(maps_job(), profile())
     assert content.headline == (
-        "Computer Engineering Student | C++ | Python | Algorithms"
+        "Robotics and Digital Systems Engineering Student | C++ | Python | Algorithms"
     )
     assert content.headline.count("|") == 3
     assert len(content.skill_categories) <= 4
@@ -420,7 +762,7 @@ def test_maps_headline_and_skill_groups_are_bounded():
 
 def test_maps_projects_show_at_most_five_verified_technologies():
     content = generate_local_content(maps_job(), profile())
-    assert len(content.projects) == 3
+    assert 3 <= len(content.projects) <= 4
     assert all(len(item.technologies) <= 5 for item in content.projects)
     validate_generated_resume(content, profile(), maps_job())
 
@@ -428,7 +770,7 @@ def test_maps_projects_show_at_most_five_verified_technologies():
 def test_maps_github_links_are_verified_https_links():
     content = generate_local_content(maps_job(), profile())
     assert all(
-        item.github_url.startswith("https://github.com/example-")
+        item.github_url.startswith("https://github.com/example-candidate")
         for item in content.projects if item.github_url is not None
     )
 
@@ -465,10 +807,10 @@ def test_internship_radar_does_not_displace_pure_embedded_projects():
     names = [
         item.name for item in generate_local_content(embedded_job(), profile()).projects
     ]
-    assert names == [
-        "Embedded Telemetry Gateway",
-        "Autonomous Lab Rover",
-        "FPGA Signal Processor",
+    assert names[:3] == [
+        "FreeRTOS Event-Driven System",
+        "MATT Web-Controlled Writing Robot",
+        "Intel MAX 10 Robotic Arm Controller",
     ]
 
 
@@ -492,7 +834,7 @@ def test_private_internship_radar_has_no_github_or_live_link():
 def test_public_internship_radar_uses_verified_github_link():
     content = generate_local_content(full_stack_job(), profile())
     radar = content.projects[0]
-    assert radar.github_url == "https://github.com/example-org/internship-radar"
+    assert radar.github_url == "https://github.com/example-candidate/Intership_radar"
 
 
 def test_internship_radar_bullets_do_not_invent_metrics_or_deployment():
@@ -510,15 +852,15 @@ def test_internship_radar_bullets_do_not_invent_metrics_or_deployment():
 def test_course_selection_is_relevant_bounded_and_low_priority_filtered():
     software_courses = _select_courses(software_job(), profile(), "Software Engineering")
     assert len(software_courses) <= 2
-    assert software_courses[0]["name"] == "Data Structures with Python"
+    assert software_courses[0]["name"] == "Python Data Structures"
     assert all(
-        item["name"] != "Python Programming Fundamentals"
+        item["name"] != "Programming for Everybody (Getting Started with Python)"
         for item in software_courses
     )
     backend_courses = _select_courses(backend_job(), profile(), "Backend / Data")
     assert [item["name"] for item in backend_courses] == [
-        "Building Web APIs with Python",
-        "Data Structures with Python",
+        "Using Python to Access Web Data",
+        "Python Data Structures",
     ]
 
 
@@ -577,6 +919,37 @@ def test_classification_supports_embedded_software_and_robotics():
     assert classify_job(job("Controls Engineer Intern", "robot motion control and autonomous systems")) == "Robotics / Controls"
 
 
+def test_google_hardware_recommended_focus_is_not_outvoted_by_software_keywords():
+    opportunity = job(
+        "Hardware Engineering Intern, BS/MS, Summer 2027",
+        "Hardware system integration, system validation, computer architecture, FPGAs, "
+        "embedded systems, prototyping, testing and debugging. " + "software Python algorithms " * 30,
+    )
+    opportunity.preferred_qualifications = (
+        "Board design, board bring-up, signal and power integrity, PCB layout, CAD, "
+        "mechanical/thermal design, electromechanical assemblies, RF and manufacturing."
+    )
+    content = generate_local_content(opportunity, profile())
+    assert content.classification == "Hardware / Systems Integration"
+    assert "Hardware/Software Integration" in content.headline
+    assert {project.name for project in content.projects[:3]} == {
+        "Intel MAX 10 Robotic Arm Controller",
+        "MATT Web-Controlled Writing Robot",
+        "FreeRTOS Event-Driven System",
+    }
+    assert "FPGA" in content.selected_skills
+    assert not {"PCB", "CAD", "RF", "Thermal Analysis", "Board Bring-Up"} & set(content.selected_skills)
+    assert not any(term in content.summary.lower() for term in ("pcb", "cad", "thermal", "manufacturing"))
+
+
+def test_explicit_resume_target_remains_a_candidate_choice():
+    opportunity = job("Hardware Engineering Intern", "FPGA and embedded systems")
+    opportunity.resume_target = "software_engineering"
+    assert classify_job(opportunity) == "Software Engineering"
+    opportunity.resume_target = "hardware_engineering"
+    assert classify_job(opportunity) == "Hardware / Systems Integration"
+
+
 def test_generated_resume_quality_checks_pass():
     content = generate_local_content(software_job(), profile())
     checks = content.quality_checks
@@ -629,6 +1002,39 @@ def test_generate_latest_pdf_and_tex(monkeypatch):
         assert pdf.status_code == 200
         tex = client.get(resume["tex_url"], headers=headers)
         assert tex.status_code == 200
+
+
+def test_manual_research_opportunity_generates_without_job_url(monkeypatch):
+    sample = generate_local_content(research_job(), profile())
+    monkeypatch.setattr(
+        "app.main.generate_resume",
+        lambda current_job, current_profile, generation_id: (
+            sample, "\\documentclass{article}", b"%PDF-1.4",
+        ),
+    )
+    with TestClient(app, headers=security_headers()) as client:
+        created = client.post("/api/research-opportunities", json={
+            "organization": "University of Washington",
+            "title": "Visiting Research Intern",
+            "lab": "MACS Lab",
+            "professor": "Xu Chen",
+            "research_areas": ["robotics", "controls", "computer vision"],
+            "description": "Robotics controls computer vision ROS SLAM CUDA",
+        })
+        assert created.status_code == 201, created.text
+        opportunity = created.json()
+        assert opportunity["opportunity_type"] == "research"
+        assert opportunity["source_url"] == ""
+        analyzed = client.post(f"/api/research-opportunities/{opportunity['id']}/analyze")
+        assert analyzed.status_code == 200, analyzed.text
+        assert {"SLAM", "CUDA"} <= set(analyzed.json()["unverified_keywords"])
+        assert analyzed.json()["recommended_projects"]
+        generated = client.post(
+            f"/api/jobs/{opportunity['id']}/resume/generate",
+            json={"resume_target": "robotics_research"},
+        )
+        assert generated.status_code == 200, generated.text
+        assert generated.json()["resume_target"] == "robotics_research"
 
 
 def _selected(content) -> list[str]:
@@ -749,14 +1155,95 @@ def test_project_supported_skill_can_appear_without_exact_job_keyword():
 
 
 def test_skill_tailoring_does_not_remove_top_projects():
-    assert [item.name for item in generate_local_content(embedded_job(), profile()).projects] == [
-        "Embedded Telemetry Gateway",
-        "Autonomous Lab Rover",
-        "FPGA Signal Processor",
+    assert [item.name for item in generate_local_content(embedded_job(), profile()).projects[:3]] == [
+        "FreeRTOS Event-Driven System",
+        "MATT Web-Controlled Writing Robot",
+        "Intel MAX 10 Robotic Arm Controller",
     ]
     assert generate_local_content(backend_job(), profile()).projects[0].name.startswith(
         "Internship Radar"
     )
+
+
+def test_four_projects_are_preferred_by_default():
+    assert len(generate_local_content(software_job(), profile()).projects) == 4
+    assert len(generate_local_content(embedded_job(), profile()).projects) == 4
+
+
+def test_simple_laboratory_practice_is_not_used_as_fourth_project():
+    candidate = profile()
+    strong_names = {"Internship Radar - AI Resume Tailoring Platform", "Stock Exchange Matching Engine", "Königsberg Graph Game"}
+    candidate.projects_json = [item for item in candidate.projects_json if item["name"] in strong_names]
+    candidate.projects_json.append({
+        "name": "PWM classroom practice", "project_type": "laboratory practice",
+        "is_resume_eligible": True, "technologies": ["ESP32", "PWM"],
+        "bullets": [
+            "Configured a simple PWM output on an ESP32 development board to change the brightness of a single LED.",
+            "Tested the classroom example by adjusting duty cycle values and observing the resulting brightness changes on the LED.",
+        ],
+    })
+    content = generate_local_content(software_job(), candidate)
+    assert len(content.projects) == 3
+    assert "PWM classroom practice" not in {project.name for project in content.projects}
+
+
+def test_four_projects_fit_by_shortening_bullets_before_removing_project(monkeypatch):
+    current_job = software_job()
+    content = generate_local_content(current_job, profile())
+    original_names = [project.name for project in content.projects]
+    monkeypatch.setattr("app.services.resume_generation._trim_lowest_priority_skill", lambda *_: False)
+    # Capture the actual fitted content rather than the input copy.
+    rendered = []
+    def render(fitted, _profile):
+        rendered.append(fitted.model_copy(deep=True))
+        return "latex"
+    monkeypatch.setattr("app.services.resume_generation.render_latex", render)
+    monkeypatch.setattr("app.services.resume_generation._compile_latex_artifact",
+                        lambda _: (b"overflow", 2, 100) if any(len(p.bullets) > 2 for p in rendered[-1].projects) else (b"fit", 1, 90))
+    fitted, _, pdf, _ = fit_resume_to_one_page(content, current_job, profile())
+    assert [project.name for project in fitted.projects] == original_names
+    assert len(fitted.projects) == 4 and pdf == b"fit"
+
+
+def test_resume_studio_portfolio_keeps_four_projects_within_two_pages(monkeypatch):
+    current_profile = profile()
+    current_job = software_job()
+    current_job.application_type = "PROFILE_PORTFOLIO"
+    content = generate_local_content(current_job, current_profile)
+    assert len(content.projects) == 4
+
+    monkeypatch.setattr(
+        "app.services.resume_generation.render_latex", lambda *_: "latex"
+    )
+    monkeypatch.setattr(
+        "app.services.resume_generation._compile_latex_artifact",
+        lambda _: (b"two-pages", 2, 90),
+    )
+
+    fitted, _, pdf, _ = fit_resume_to_one_page(content, current_job, current_profile)
+
+    assert len(fitted.projects) == 4
+    assert pdf == b"two-pages"
+    assert fitted.quality_checks.one_page is False
+    assert fitted.quality_checks.within_two_pages is True
+
+
+def test_overflowing_fourth_is_not_readded_in_underfilled_page(monkeypatch):
+    current_job = software_job()
+    content = generate_local_content(current_job, profile())
+    for project in content.projects:
+        project.bullets = project.bullets[:2]
+    monkeypatch.setattr("app.services.resume_generation._trim_lowest_priority_skill", lambda *_: False)
+    rendered = []
+    def render(fitted, _profile):
+        rendered.append(fitted.model_copy(deep=True))
+        return "latex"
+    monkeypatch.setattr("app.services.resume_generation.render_latex", render)
+    monkeypatch.setattr("app.services.resume_generation._compile_latex_artifact",
+                        lambda _: (b"overflow", 2, 100) if len(rendered[-1].projects) == 4 else (b"fit", 1, 70))
+    fitted, _, pdf, _ = fit_resume_to_one_page(content, current_job, profile())
+    assert len(fitted.projects) == 3 and pdf == b"fit"
+    assert len(rendered) <= 4
 
 
 def test_one_page_fitting_reduces_skills_before_courses_or_projects(monkeypatch):
@@ -813,7 +1300,16 @@ def test_generated_resume_version_keeps_its_original_skill_snapshot():
         assert stored_profile is not None
         # A generated version stores an immutable snapshot rather than reading the
         # current master profile every time it is displayed.
-        job_id = db.execute(select(Job.id).limit(1)).scalar_one()
+        job_id = db.execute(select(Job.id).limit(1)).scalar_one_or_none()
+        if job_id is None:
+            snapshot_job = Job(
+                source_name="snapshot-test", source_url="https://example.com/job",
+                company="Example", title="Snapshot test", apply_url="https://example.com/apply",
+                raw_data_hash="snapshot-test",
+            )
+            db.add(snapshot_job)
+            db.flush()
+            job_id = snapshot_job.id
         original_skills = list(stored_profile.skills_json)
         version = GeneratedResume(
             user_id=stored_profile.user_id,

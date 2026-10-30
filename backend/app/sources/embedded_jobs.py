@@ -275,13 +275,41 @@ class EmbeddedJobsAdapter(JobSourceAdapter):
     async def collect(self) -> list[NormalizedJob]:
         summaries = await self.fetch_jobs()
         collected: list[NormalizedJob] = []
+        detail_rate_limited = False
         for summary in summaries[: settings.embedded_jobs_max_details]:
             country = summary.get("country")
             location_text = summary.get("location", "").lower()
             if country not in {"Mexico", "United States", "Canada", "Remote"} and "remote" not in location_text:
                 continue
-            await asyncio.sleep(max(settings.embedded_jobs_delay_seconds, settings.source_rate_limit_seconds))
-            details = await self.fetch_job_details(summary)
+            details = dict(summary)
+            if not detail_rate_limited:
+                await asyncio.sleep(max(settings.embedded_jobs_delay_seconds, settings.source_rate_limit_seconds))
+                try:
+                    details = await self.fetch_job_details(summary)
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 429:
+                        detail_rate_limited = True
+                        details.update({
+                            "official_status": "unknown",
+                            "verification_status": "unverified",
+                            "verification_method": "embedded_jobs_listing_rate_limited",
+                            "status_reason": (
+                                "EmbeddedJobs listing found; detail verification was deferred "
+                                "because the site rate-limited additional requests."
+                            ),
+                        })
+                    else:
+                        raise
+            elif detail_rate_limited:
+                details.update({
+                    "official_status": "unknown",
+                    "verification_status": "unverified",
+                    "verification_method": "embedded_jobs_listing_rate_limited",
+                    "status_reason": (
+                        "EmbeddedJobs listing found; detail verification was deferred "
+                        "because the site rate-limited additional requests."
+                    ),
+                })
             official_url = self.find_official_application(details)
             if official_url:
                 result = await self.verify_official_status(
@@ -300,7 +328,7 @@ class EmbeddedJobsAdapter(JobSourceAdapter):
                         "last_verified_at": result.last_verified_at,
                     }
                 )
-            else:
+            elif not details.get("verification_method"):
                 details.update(
                     {
                         "official_status": "unknown",

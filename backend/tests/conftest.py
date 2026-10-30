@@ -32,18 +32,23 @@ os.environ["AUTHORIZED_USER_EMAILS"] = (
 os.environ["EMAIL_RECIPIENT"] = "alerts@example.com"
 os.environ["RESUME_EMAIL"] = "candidate@example.com"
 os.environ["NOTIFICATION_EMAIL"] = "alerts@example.com"
+os.environ["CANDIDATE_ACCOUNT_IDS"] = json.dumps({
+    "secondary@example.com": "00000000-0000-5000-8000-000000000001",
+    "tertiary@example.com": "00000000-0000-5000-8000-000000000002",
+})
 
 
 def security_headers(
     email: str = "candidate@example.com",
     *,
+    subject: str = "internship-radar-primary",
     expires_offset: int = 60,
     signing_secret: str = "test-user-identity-signing-secret",
 ) -> dict[str, str]:
     now = int(time.time())
     payload = {
         "v": 1,
-        "sub": "internship-radar-primary",
+        "sub": subject,
         "email": email,
         "iat": now,
         "exp": now + expires_offset,
@@ -66,12 +71,12 @@ def security_headers(
 @pytest.fixture
 def profile():
     return {
-        "graduation_year": 2029,
-        "graduation_date": "2029-05-31",
+        "graduation_year": 2028,
+        "graduation_date": "2028-06-30",
         "degree_level_current": "BACHELORS",
         "degree_status": "IN_PROGRESS",
-        "expected_graduation_date": "2029-05-31",
-        "degree_field": "Computer Engineering",
+        "expected_graduation_date": "2028-06-30",
+        "degree_field": "Robotics and Digital Systems Engineering",
         "veteran_status": "NOT_VETERAN",
         "military_status": "NONE",
         "military_spouse": False,
@@ -106,6 +111,11 @@ def profile():
             "Robotics",
             "Controls",
             "Testing",
+        ],
+        "skills_json": [
+            "C", "C++", "Python", "Linux", "Git", "Embedded Systems",
+            "Firmware", "FPGA", "Verilog", "Digital Design", "Robotics",
+            "Controls", "Testing",
         ],
     }
 

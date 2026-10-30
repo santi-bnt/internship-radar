@@ -230,7 +230,7 @@ def _eligible_for_email(job: Job, analysis: JobAnalysis | None, minimum_score: f
         and job.verification_status == "verified"
         and bool(job.official_apply_url or job.apply_url)
         and analysis.overall_score >= minimum_score
-        and analysis.recommendation not in {"Not Eligible", "Closed", "Needs Verification"}
+        and analysis.recommendation not in {"Not Eligible", "Closed", "Expired", "Needs Verification"}
         and not analysis.blocker_reasons
     )
 
@@ -646,7 +646,7 @@ class EmailService:
         recommended_lines = [
             job_line(job)
             for job in eligible_jobs
-            if job.analysis and job.analysis.recommendation in {"Apply Today", "Review"}
+            if job.analysis and job.analysis.recommendation in {"Apply Now", "Apply Today", "Review"}
         ]
         new_lines = [
             job_line(job)
@@ -741,8 +741,8 @@ class EmailService:
         )
         became_apply_today = bool(
             previous_state
-            and previous_state.get("recommendation") != "Apply Today"
-            and job.analysis.recommendation == "Apply Today"
+            and previous_state.get("recommendation") not in {"Apply Today", "Apply Now"}
+            and job.analysis.recommendation in {"Apply Today", "Apply Now"}
         )
         opportunity_event = is_new or became_verified or became_apply_today
         sent_opportunity = False

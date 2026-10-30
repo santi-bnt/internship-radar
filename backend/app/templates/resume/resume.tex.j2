@@ -9,7 +9,12 @@
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0pt}
 \setlength{\emergencystretch}{2em}
-{% if content.classification == "Maps / Routing / Geospatial" %}
+{% if content.classification == "KOSPIE / Germany Engineering" %}
+\geometry{margin=0.64in}
+\renewcommand{\baselinestretch}{1.08}\selectfont
+\setlist[itemize]{leftmargin=1.15em,itemsep=2pt,topsep=3pt,parsep=0pt,partopsep=0pt}
+\newcommand{\sectionheading}[1]{\vspace{6pt}{\large\bfseries #1}\par\vspace{2pt}\hrule\vspace{3.5pt}}
+{% elif content.classification == "Maps / Routing / Geospatial" %}
 \renewcommand{\baselinestretch}{1.10}\selectfont
 \setlist[itemize]{leftmargin=1.15em,itemsep=2pt,topsep=3pt,parsep=0pt,partopsep=0pt}
 \newcommand{\sectionheading}[1]{\vspace{6pt}{\large\bfseries #1}\par\vspace{2pt}\hrule\vspace{3.5pt}}
@@ -52,7 +57,7 @@
 
 {% macro render_skills() -%}
 {% set groups = content.skill_categories|selectattr("items")|list %}
-{% if groups %}\sectionheading{Skills}
+{% if groups %}\sectionheading{ {{- "Technical Skills" if content.classification == "KOSPIE / Germany Engineering" else "Skills" -}} }
 {% for group in groups %}\skillsrow{ {{- group.name|latex -}} }{ {{- group["items"]|join(", ")|latex -}} }
 {% endfor %}{% endif %}
 {%- endmacro %}
@@ -87,14 +92,25 @@
 { {{- item.dates|latex -}} }
 { {{- item.github_url|latex -}} }
 { {{- item.live_url|latex -}} }
+{% if item.project_type_label %}{\small\textit{ {{- item.project_type_label|latex -}} }\par}{% endif %}
 {{ bullet_list(item.bullets) }}
 {% endfor %}{% endif %}
 {%- endmacro %}
 
+{% macro render_research_interests() -%}
+{% if content.research_interests %}\sectionheading{Research Interests}
+{{ content.research_interests|join(", ")|latex }}
+{% endif %}
+{%- endmacro %}
+
 {% macro render_coursework() -%}
-{% if content.coursework %}\sectionheading{Relevant Coursework}
+{% if content.coursework %}\sectionheading{ {{- "Courses" if content.classification == "KOSPIE / Germany Engineering" else "Relevant Coursework" -}} }
+{% if content.classification == "KOSPIE / Germany Engineering" %}
+{% for item in content.coursework %}{% if not loop.first %} \textbar{} {% endif %}{{ item.name|latex }}{% endfor %}\par
+{% else %}
 {% for item in content.coursework %}{\bfseries {{ item.name|latex }}} --- {{ item.institution|latex }}{% if item.issued %}\hfill {{ item.issued|latex }}{% endif %}\par
 {% endfor %}
+{% endif %}
 {% endif %}
 {%- endmacro %}
 
@@ -110,9 +126,15 @@
 {% endif %}
 {%- endmacro %}
 
+{% macro render_additional_information() -%}
+{% if content.additional_information %}\sectionheading{Additional Information}
+{% for item in content.additional_information %}{% if not loop.first %} \textbar{} {% endif %}{{ item|latex }}{% endfor %}
+{% endif %}
+{%- endmacro %}
+
 \begin{document}
 {\LARGE\bfseries {{ profile.full_name|latex }}}\hfill {{ profile.location|latex }}\par
-{{ profile.email|latex }}{% if profile.phone %} \textbar{} {{ profile.phone|latex }}{% endif %}{% if profile.linkedin_url %} \textbar{} \resumelink{ {{- profile.linkedin_url|latex -}} }{LinkedIn}{% endif %}{% if profile.github_url %} \textbar{} \resumelink{ {{- profile.github_url|latex -}} }{GitHub}{% endif %}\par
+{{ profile.email|latex }}{% if profile.phone %} \textbar{} {{ profile.phone|latex }}{% endif %}{% if profile.linkedin_url %} \textbar{} \href{ {{- profile.linkedin_url|latex -}} }{ {{- profile.linkedin_label|latex -}} }{% endif %}{% if profile.github_url %} \textbar{} \resumelink{ {{- profile.github_url|latex -}} }{GitHub}{% endif %}\par
 {\bfseries {{ content.headline|latex }}}\par
 
 {% for section in content.section_order %}
@@ -124,6 +146,8 @@
 {% elif section == "coursework" %}{{ render_coursework() }}
 {% elif section == "certifications" %}{{ render_certifications() }}
 {% elif section == "languages" %}{{ render_languages() }}
+{% elif section == "research_interests" %}{{ render_research_interests() }}
+{% elif section == "additional_information" %}{{ render_additional_information() }}
 {% endif %}
 {% endfor %}
 \end{document}

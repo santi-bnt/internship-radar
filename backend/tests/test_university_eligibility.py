@@ -76,7 +76,7 @@ def test_foreign_job_accepting_any_university_is_review_or_apply_today(
     assert result.blocker_reasons == []
 
 
-def test_mexico_job_accepts_student_from_generic_accredited_university(profile, base_job):
+def test_mexico_job_accepts_tecnologico_de_monterrey_student(profile, base_job):
     job = with_requirements(
         base_job,
         "Currently pursuing a Bachelor's degree at an accredited institution.",

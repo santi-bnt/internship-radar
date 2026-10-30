@@ -2,16 +2,18 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { isAppAccessEnabled, isPublicDemoMode } from "@/lib/access";
+import { isAppAccessEnabled } from "@/lib/access";
 import { frameSecurityPolicy } from "@/lib/frame-policy";
 import {
+  ALONSO_EMAIL,
+  ALONSO_USER_ID,
   authorizedEmails,
   isAuthorizedEmail,
   normalizeEmail,
   resolvePrimaryUser,
 } from "@/lib/identity";
 import { removeItemOptimistically } from "@/lib/jobs-state";
-import { checkRateLimit } from "@/lib/rate-limit";
+import { checkRateLimit, sensitiveOperation } from "@/lib/rate-limit";
 import { createUserIdentityToken } from "@/lib/user-identity-token";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -22,8 +24,7 @@ beforeEach(() => {
   process.env.PRIMARY_USER_ID = "internship-radar-primary";
   process.env.USER_IDENTITY_SIGNING_SECRET = "unit-test-signing-secret";
   process.env.APP_ACCESS_ENABLED = "false";
-  process.env.PUBLIC_DEMO_MODE = "false";
-  process.env.NEXT_PUBLIC_PUBLIC_DEMO_MODE = "false";
+  process.env.CANDIDATE_ACCOUNT_IDS = JSON.stringify({ [ALONSO_EMAIL]: ALONSO_USER_ID });
 });
 
 afterEach(() => {
@@ -47,6 +48,12 @@ describe("authorized identity", () => {
       expect(resolvePrimaryUser(email)).toBe("internship-radar-primary");
     }
     expect(resolvePrimaryUser("attacker@example.com")).toBeNull();
+  });
+
+  it("keeps Alonso as a separate authorized candidate account", () => {
+    expect(isAuthorizedEmail(ALONSO_EMAIL)).toBe(true);
+    expect(resolvePrimaryUser(ALONSO_EMAIL)).toBe(ALONSO_USER_ID);
+    expect(resolvePrimaryUser(ALONSO_EMAIL)).not.toBe("internship-radar-primary");
   });
 });
 
@@ -73,18 +80,16 @@ describe("signed BFF identity", () => {
 });
 
 describe("server-side access and abuse controls", () => {
+  it("protects portfolio CV generation without rate-limiting read-only analysis", () => {
+    expect(sensitiveOperation("/api/resume-studio/resumes", "POST")?.key).toBe("resume");
+    expect(sensitiveOperation("/api/resume-studio/analysis", "GET")).toBeNull();
+  });
   it("fails closed unless access is explicitly true", () => {
     expect(isAppAccessEnabled()).toBe(false);
     delete process.env.APP_ACCESS_ENABLED;
     expect(isAppAccessEnabled()).toBe(false);
     process.env.APP_ACCESS_ENABLED = "TRUE";
     expect(isAppAccessEnabled()).toBe(true);
-  });
-
-  it("enables public demo mode only through an explicit flag", () => {
-    expect(isPublicDemoMode()).toBe(false);
-    process.env.PUBLIC_DEMO_MODE = "TRUE";
-    expect(isPublicDemoMode()).toBe(true);
   });
 
   it("rate-limits by authenticated primary user", () => {

@@ -21,11 +21,15 @@ from app.services.normalization import normalize_title, normalized_token
 
 STUDENT_TERMS = (
     "intern", "internship", "co-op", "co op", "student", "university",
-    "new college grad", "entry level",
+    "student worker", "working student", "undergraduate", "trainee",
+    "new college grad", "entry level", "early career",
 )
 SENIOR_TERMS = ("senior", "staff", "principal", "manager", "director", "lead")
 TARGET_ROLE_TERMS = (
     "software",
+    "application engineering",
+    "security consultant",
+    "site reliability",
     "sde",
     "embedded",
     "firmware",
@@ -39,8 +43,16 @@ TARGET_ROLE_TERMS = (
     "systems",
     "iot",
     "automation",
+    "backend",
+    "full stack",
+    "frontend",
+    "debug",
+    "silicon",
+    "soc",
+    "computer architecture",
     "controls",
     "computer vision",
+    "research",
     "edge ai",
     "ai",
     "machine learning",
@@ -49,6 +61,18 @@ TARGET_ROLE_TERMS = (
     "linux",
     "device",
     "platform",
+    "infrastructure",
+    "cloud",
+    "devops",
+    "site reliability",
+    "network",
+    "security",
+    "solutions engineering",
+    "developer engineering",
+    "semiconductor",
+    "manufacturing",
+    "automotive software",
+    "electronics",
     "validation",
     "verification",
 )
@@ -62,6 +86,9 @@ PROFILE_EXCLUSION_TERMS = (
 
 
 def is_target_internship_title(title: str) -> bool:
+    from app.services.talent_communities import is_talent_community
+    if is_talent_community(title):
+        return True
     normalized = clean_text(title).lower()
     return (
         not any(term in normalized for term in PROFILE_EXCLUSION_TERMS)
@@ -87,6 +114,12 @@ class NormalizedJob:
     requirements: str
     preferred_qualifications: str
     apply_url: str
+    posting_url: str
+    application_url: str
+    application_url_source: str
+    application_url_status: str
+    application_url_last_verified_at: datetime | None
+    application_url_diagnostic: str
     posted_at: datetime | None
     is_active: bool = True
     city: str = ""
@@ -139,10 +172,26 @@ class NormalizedJob:
 
 
 class JobSourceAdapter(ABC):
-    def __init__(self, company: str, source_identifier: str, source_url: str):
+    def __init__(
+        self,
+        company: str,
+        source_identifier: str,
+        source_url: str,
+        search_criteria: dict[str, Any] | None = None,
+    ):
         self.company = company
         self.source_identifier = source_identifier
         self.source_url = source_url
+        self.search_criteria = search_criteria or {}
+
+    def search_terms(self, defaults: tuple[str, ...] = (
+        "software intern", "embedded firmware intern", "hardware intern",
+        "fpga intern", "research intern", "machine learning intern",
+        "co-op", "early career",
+    )) -> list[str]:
+        from app.services.search_criteria import discovery_search_terms
+
+        return discovery_search_terms(self.search_criteria) or list(defaults)
 
     @property
     @abstractmethod
@@ -238,6 +287,11 @@ class JobSourceAdapter(ABC):
             "last_verified_at": parse_datetime(last_verified_at),
         }
         signals = extract_job_eligibility_signals(signal_input)
+        posting_url = original_source_url or apply_url
+        application_url = official_url or ""
+        application_status = "VERIFIED" if verification_status == "verified" and application_url else (
+            "DISCOVERED" if application_url else "MISSING"
+        )
         return NormalizedJob(
             external_id=str(external_id) if external_id is not None else None,
             source_name=self.source_name,
@@ -269,6 +323,12 @@ class JobSourceAdapter(ABC):
             requirements=display_requirements,
             preferred_qualifications=display_preferred,
             apply_url=official_url or apply_url or original_source_url,
+            posting_url=posting_url,
+            application_url=application_url,
+            application_url_source=("OFFICIAL_ATS" if official_url else "UNKNOWN"),
+            application_url_status=application_status,
+            application_url_last_verified_at=parse_datetime(last_verified_at),
+            application_url_diagnostic=("" if application_url else "APPLICATION_URL_NOT_FOUND"),
             official_apply_url=official_url,
             original_source_url=original_source_url or apply_url,
             discovered_from_source=discovered_from_source or self.source_name,

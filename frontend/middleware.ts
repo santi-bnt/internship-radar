@@ -2,7 +2,7 @@ import type { NextFetchEvent } from "next/server";
 import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/auth";
-import { isAppAccessEnabled, isPublicDemoMode } from "@/lib/access";
+import { isAppAccessEnabled, isLocalDevelopmentMode, isPublicDemoMode } from "@/lib/access";
 import { auditSecurityEvent } from "@/lib/audit";
 import { frameSecurityPolicy } from "@/lib/frame-policy";
 import { isAuthorizedEmail } from "@/lib/identity";
@@ -60,7 +60,7 @@ export default async function middleware(request: NextRequest, event: NextFetchE
   const pathname = request.nextUrl.pathname;
   if (isPublicPath(pathname)) return secureResponse(NextResponse.next(), pathname);
 
-  if (isPublicDemoMode()) {
+  if (isPublicDemoMode() || isLocalDevelopmentMode()) {
     return secureResponse(NextResponse.next(), pathname);
   }
 
@@ -81,6 +81,10 @@ export default async function middleware(request: NextRequest, event: NextFetchE
       NextResponse.redirect(new URL("/maintenance", request.url), 307),
       pathname,
     );
+  }
+
+  if (pathname.startsWith("/api/backend/api/extension/")) {
+    return secureResponse(NextResponse.next(), pathname);
   }
 
   return (

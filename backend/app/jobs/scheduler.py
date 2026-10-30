@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.core.config import settings
 from app.services.email_service import run_daily_digest, run_email_maintenance
 from app.services.search_runs import run_managed_search
+from app.services.discovery_orchestration import DISCOVERY_GROUPS, configured_group_hour, run_discovery_group
 
 
 scheduler = AsyncIOScheduler(timezone=settings.user_timezone)
@@ -14,7 +15,6 @@ def start_scheduler() -> None:
     if settings.search_scheduler_enabled:
         for search_type, hours in (
             ("high_priority", settings.high_priority_search_interval_hours),
-            ("general", settings.general_search_interval_hours),
             ("verification", settings.verify_jobs_interval_hours),
             ("expire_deadlines", settings.expire_jobs_interval_hours),
         ):
@@ -27,6 +27,22 @@ def start_scheduler() -> None:
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
+            )
+        # A group scheduler replaces the previous all-source general sweep.
+        # This stays one scheduler process while spreading source adapters over
+        # different windows through the day.
+        for group in DISCOVERY_GROUPS:
+            scheduler.add_job(
+                run_discovery_group,
+                "cron",
+                hour=configured_group_hour(group),
+                minute=0,
+                args=[group, "scheduler"],
+                id=f"discovery-group-{group.lower()}",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+                jitter=max(0, settings.discovery_jitter_seconds),
             )
     scheduler.add_job(
         run_email_maintenance,

@@ -34,6 +34,46 @@ class SmartRecruitersAdapter(JobSourceAdapter):
             "united states", "united states of america",
         } or bool(location.get("remote"))
 
+    async def fetch_exact_ids(
+        self,
+        posting_ids: set[str],
+        *,
+        require_all: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Fetch named public requisitions without widening a source scan."""
+        requested = {str(item).strip() for item in posting_ids if str(item).strip()}
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout_seconds,
+            headers={"User-Agent": settings.user_agent},
+            follow_redirects=True,
+        ) as client:
+            found: dict[str, dict[str, Any]] = {}
+            for posting_id in sorted(requested):
+                detail_url = f"{self.api_url}/{posting_id}"
+                validate_public_url(detail_url)
+                try:
+                    response = await client.get(detail_url)
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        continue
+                    raise
+                detail = response.json()
+                # ``id`` is SmartRecruiters' public posting ID, the stable
+                # identifier exposed in their careers URLs.  ``uuid`` is an
+                # internal record identifier and must not displace the public
+                # requisition when reconciling a candidate-requested posting.
+                record_id = str(detail.get("id") or detail.get("uuid") or "")
+                if record_id == posting_id:
+                    found[posting_id] = detail
+        missing = sorted(requested - set(found))
+        if missing and require_all:
+            raise RuntimeError(
+                "SmartRecruiters did not verify the requested public posting IDs: "
+                + ", ".join(missing)
+            )
+        return [found[posting_id] for posting_id in sorted(found)]
+
     async def fetch_jobs(self) -> list[dict[str, Any]]:
         validate_public_url(self.api_url)
         async with httpx.AsyncClient(
@@ -121,7 +161,7 @@ class SmartRecruitersAdapter(JobSourceAdapter):
         posting_url = raw.get("postingUrl") or apply_url
         return self.build_job(
             raw,
-            external_id=raw.get("uuid") or raw.get("id"),
+            external_id=raw.get("id") or raw.get("uuid"),
             company=self.company,
             title=raw.get("name", ""),
             location=location,

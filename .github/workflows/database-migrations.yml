@@ -1,0 +1,54 @@
+name: Production database migrations
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/alembic/**"
+      - "backend/app/models/**"
+      - "backend/app/jobs/prepare_database.py"
+      - "backend/requirements.txt"
+      - ".github/workflows/database-migrations.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: internship-radar-database-search
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: ${{ vars.ENABLE_PUBLIC_AUTOMATION == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Require the production database secret
+        shell: bash
+        run: test -n "$DATABASE_URL"
+
+      - name: Apply all pending migrations
+        run: python -m alembic upgrade head
+
+      - name: Verify the deployed model schema
+        run: python -c "from app.jobs.prepare_database import _verify_model_schema; _verify_model_schema(); print('Production database schema verified.')"

@@ -33,9 +33,8 @@ def _apply_owner_scope(execute_state) -> None:
             statement = statement.options(
                 with_loader_criteria(
                     model,
-                    lambda entity, owner=owner_user_id: entity.owner_user_id == owner,
+                    lambda entity: entity.owner_user_id == owner_user_id,
                     include_aliases=True,
-                    track_closure_variables=False,
                 )
             )
     execute_state.statement = statement

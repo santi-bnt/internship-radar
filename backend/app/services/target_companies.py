@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.services.normalization import normalized_token
 
@@ -30,7 +30,7 @@ HIGH_PRIORITY = {
 TARGET_COMPANY_SEED = {
     "Cloud and data": [
         "Oracle", "Amazon", "Microsoft", "Google", "IBM", "Salesforce", "ServiceNow",
-        "Snowflake", "Databricks", "MongoDB", "Cloudflare",
+        "Snowflake", "Databricks", "MongoDB", "Cloudflare", "Duolingo", "Roblox",
     ],
     "Semiconductors": [
         "NVIDIA", "Intel", "AMD", "Qualcomm", "NXP Semiconductors", "Texas Instruments",
@@ -48,6 +48,8 @@ ALIASES = {
         "OCI", "Oracle Labs", "NetSuite",
     ],
     "Amazon": ["Amazon", "Amazon Web Services", "AWS"],
+    "Duolingo": ["Duolingo"],
+    "Roblox": ["Roblox", "Roblox Corporation"],
     "NXP Semiconductors": ["NXP Semiconductors", "NXP"],
     "Arm": ["Arm", "Arm Holdings"],
     "Volkswagen Group Technologies": ["Volkswagen Group Technologies", "Volkswagen", "VW"],
@@ -71,6 +73,8 @@ VERIFIED_CAREER_URLS = {
     "Databricks": ["https://boards.greenhouse.io/databricks"],
     "MongoDB": ["https://boards.greenhouse.io/mongodb"],
     "Cloudflare": ["https://boards.greenhouse.io/cloudflare"],
+    "Duolingo": ["https://job-boards.greenhouse.io/duolingounirecruitment"],
+    "Roblox": ["https://careers.roblox.com/jobs"],
     "Bosch": ["https://jobs.smartrecruiters.com/BoschGroup"],
     "Rockwell Automation": [
         "https://rockwellautomation.wd1.myworkdayjobs.com/External_Rockwell_Automation"
@@ -115,7 +119,18 @@ def canonicalize_url(value: str) -> str:
         return ""
     parsed = urlsplit(value.strip())
     path = parsed.path.rstrip("/")
-    return urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(), path, parsed.query, ""))
+    # Source and social-network URLs frequently add tracking-only query
+    # parameters. They must not turn one official requisition into a new job.
+    # Keep employer identity parameters such as ``jobId`` intact.
+    tracking_keys = {"ref", "source", "src", "trk", "tracking", "tracking_id", "trackingid"}
+    query = sorted(
+        (key, item)
+        for key, item in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.casefold() not in tracking_keys and not key.casefold().startswith("utm_")
+    )
+    return urlunsplit((
+        parsed.scheme.lower(), parsed.netloc.lower(), path, urlencode(query), "",
+    ))
 
 
 def search_is_due(company: Any, now: datetime | None = None) -> bool:

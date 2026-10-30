@@ -144,6 +144,33 @@ def test_official_posting_replaces_community_data_but_keeps_provenance():
     assert job.discovery_sources == ["SimplifyJobs", "Intel Careers"]
 
 
+def test_applied_job_is_not_reactivated_by_duplicate_merge():
+    applied_at = datetime.now(timezone.utc)
+    job = SimpleNamespace(
+        status="applied",
+        applied_at=applied_at,
+        alternate_sources=[], discovery_sources=["SimplifyJobs"], community_markers=[],
+        discovered_from_source="SimplifyJobs", official_apply_url=None, official_status="unknown",
+        verification_status="unverified", source_name="SimplifyJobs", source_url="community",
+        apply_url="https://jobs.example.com/job/123", last_seen_at=None, last_checked_at=None, missing_refreshes=0,
+    )
+
+    _merge_duplicate(job, {
+        "source_name": "Official",
+        "source_url": "https://jobs.example.com",
+        "apply_url": "https://jobs.example.com/job/123",
+        "status": "active",
+        "company": "Example",
+        "title": "Software Intern",
+        "location": "Remote",
+        "official_status": "open",
+        "verification_status": "verified",
+    })
+
+    assert job.status == "applied"
+    assert job.applied_at == applied_at
+
+
 def test_community_sponsorship_hint_is_not_final_fact():
     raw = parse_markdown_jobs(markdown_row(marker="🛂"), "simplify")[0]
     job = adapter().normalize_job(raw)
@@ -158,7 +185,7 @@ def test_unverified_community_job_never_becomes_eligible_automatically():
         "simplify",
     )[0]
     job = adapter().normalize_job(raw)
-    analysis = analyze_job(job, SimpleNamespace(graduation_year=2029, skills=[]))
+    analysis = analyze_job(job, SimpleNamespace(graduation_year=2028, skills=[]))
     assert analysis.eligibility_status == "UNKNOWN"
     assert analysis.recommendation == "Review"
 

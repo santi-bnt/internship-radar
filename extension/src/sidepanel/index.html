@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Internship Radar AI Apply Agent</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand-mark">IR</div>
+      <div><strong>Internship Radar</strong><span>AI Apply Agent</span></div>
+    </header>
+    <main>
+      <div id="status" class="status">Connecting to the current application portal…</div>
+      <section id="enable-card" class="question-card" hidden>
+        <strong>Enable this career portal</strong>
+        <p>Internship Radar requests access only to the current portal origin when you activate it.</p>
+        <button id="enable-portal" class="primary">Enable Apply Assistant Here</button>
+      </section>
+      <section id="job" class="job-card" hidden>
+        <span id="portal">Application portal</span>
+        <h1 id="job-title"></h1>
+        <p id="company"></p>
+        <div class="progress"><div id="progress-bar"></div></div>
+        <small id="progress-label">0% complete</small>
+      </section>
+      <section id="section-card" hidden>
+        <span class="label">Current section</span>
+        <strong id="current-section"></strong>
+        <div id="counts" class="counts"></div>
+      </section>
+      <section id="agent-status-card" class="agent-card" hidden>
+        <div class="agent-heading"><strong>Application plan</strong><span id="privacy-mode"></span></div>
+        <ul id="agent-checks"></ul>
+      </section>
+      <section id="agent-decision-card" class="agent-card decision" hidden>
+        <span class="label">Agent decision</span>
+        <strong id="agent-decision-field"></strong>
+        <p id="agent-decision-value"></p>
+        <p id="agent-decision-reason"></p>
+        <small id="agent-decision-meta"></small>
+        <div class="actions">
+          <button id="use-agent-decision" class="primary">Use</button>
+          <button id="change-agent-decision">Change</button>
+        </div>
+      </section>
+      <section id="safety" class="safety">
+        <strong>Final submission is always manual.</strong>
+        <p>The assistant never handles passwords, MFA, CAPTCHA, electronic signatures, or the final Submit button.</p>
+      </section>
+      <section id="question-card" class="question-card" hidden>
+        <span class="warning">Confirmation required</span>
+        <p id="question"></p>
+        <div id="previous-confirmation" class="previous"></div>
+        <label>Answer<input id="answer" autocomplete="off" /></label>
+        <button id="confirm-answer" class="primary">Confirm for this application</button>
+      </section>
+      <section id="application-questions-card" hidden>
+        <strong>Application questions</strong>
+        <p>Read the current form and prepare answers using your verified projects and skills. Review and edit each answer before using it.</p>
+        <button id="read-questions" class="primary">Read questions &amp; draft answers</button>
+        <div id="application-questions" aria-live="polite"></div>
+      </section>
+      <section id="review-card" class="review-card" hidden>
+        <strong>Application ready for final review</strong>
+        <p id="review-summary"></p>
+        <ul id="agent-review-items"></ul>
+        <p>Please review the application portal. Internship Radar will not press Submit.</p>
+      </section>
+      <section id="legal-review-card" class="legal-review-card" hidden>
+        <strong>Legal &amp; Eligibility Answers</strong>
+        <dl id="legal-review"></dl>
+        <button id="edit-answers">Edit Answers on Portal</button>
+      </section>
+      <section id="application-check-card" class="check-card" hidden>
+        <strong>Zipline Application Check</strong>
+        <ul id="application-checks"></ul>
+        <p id="blocking-count"></p>
+      </section>
+      <section id="manual-card" class="issues-card" hidden>
+        <strong>Manual action required</strong>
+        <p id="manual-reason"></p>
+        <button id="continue-manually">Continue Manually</button>
+      </section>
+      <section id="confirmation-card" class="confirmation-card" hidden>
+        <strong>The application portal appears to confirm submission.</strong>
+        <p>Confirm only after you manually pressed Submit and verified the confirmation page.</p>
+        <button id="confirm-applied" class="primary">Confirm Applied</button>
+      </section>
+      <section id="conflict-card" class="issues-card" hidden>
+        <strong>Saved profile conflict</strong>
+        <p id="conflict-label"></p>
+        <p><b>Portal:</b> <span id="portal-value"></span></p>
+        <p><b>Internship Radar:</b> <span id="verified-value"></span></p>
+        <div class="actions">
+          <button id="keep-portal">Keep portal value</button>
+          <button id="use-verified" class="primary">Use verified value</button>
+        </div>
+      </section>
+      <section id="issues-card" class="issues-card" hidden>
+        <strong>Potential consistency errors</strong>
+        <ul id="issues"></ul>
+      </section>
+      <section id="resume-card" class="resume-card" hidden>
+        <strong>Resume ready</strong>
+        <span id="resume-name"></span>
+        <button id="download-resume">Download / Prepare Upload</button>
+        <small>The exact session resume is attached when the portal permits it; otherwise use this prepared download.</small>
+      </section>
+      <section id="portfolio-card" class="resume-card" hidden>
+        <strong>Project Portfolio</strong>
+        <span id="portfolio-name"></span>
+        <span>Recommended for this application: Yes</span>
+        <button id="download-portfolio">Download / Prepare Upload</button>
+      </section>
+      <div class="actions">
+        <button id="autopilot" class="primary">Run Safe Autopilot</button>
+        <button id="ai-fill" class="primary">Analyze &amp; Fill Safely</button>
+        <button id="fill">Standard Autofill</button>
+        <button id="review">Review Fields</button>
+        <button id="continue">Continue</button>
+        <button id="pause">Pause Assistant</button>
+      </div>
+      <label class="toggle"><input id="auto-continue" type="checkbox" /> Automatically continue safe pages <em>Off by default</em></label>
+      <pre id="debug" hidden></pre>
+    </main>
+    <script type="module" src="index.js"></script>
+  </body>
+</html>

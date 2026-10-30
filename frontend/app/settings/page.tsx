@@ -4,7 +4,7 @@ import { Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { api, formatDate } from "@/lib/api";
-import type { TargetCompany, TargetSearchRun } from "@/lib/types";
+import type { AISettings, ExternalAIAudit, TargetCompany, TargetSearchRun } from "@/lib/types";
 
 const splitValues = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
 
@@ -12,7 +12,9 @@ export default function SettingsPage() {
   const [companies, setCompanies] = useState<TargetCompany[]>([]);
   const [drafts, setDrafts] = useState<Record<number, TargetCompany>>({});
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<number | "all" | "add" | null>(null);
+  const [busy, setBusy] = useState<number | "all" | "add" | "privacy" | null>(null);
+  const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
+  const [privacyActivity, setPrivacyActivity] = useState<ExternalAIAudit[]>([]);
   const [newCompany, setNewCompany] = useState<{
     company_name: string;
     aliases: string;
@@ -32,10 +34,33 @@ export default function SettingsPage() {
       const items = await api<TargetCompany[]>("/api/target-companies");
       setCompanies(items);
       setDrafts(Object.fromEntries(items.map((item) => [item.id, item])));
+      const [settingsResult, activityResult] = await Promise.allSettled([
+        api<AISettings>("/api/ai-settings"),
+        api<ExternalAIAudit[]>("/api/ai-privacy-activity"),
+      ]);
+      if (settingsResult.status === "fulfilled") setAiSettings(settingsResult.value);
+      if (activityResult.status === "fulfilled") setPrivacyActivity(activityResult.value);
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : "Could not load target companies.");
     }
   }, []);
+
+  async function saveAiSettings() {
+    if (!aiSettings) return;
+    setBusy("privacy");
+    try {
+      const saved = await api<AISettings>("/api/ai-settings", {
+        method: "PUT",
+        body: JSON.stringify({ ai_mode: aiSettings.ai_mode }),
+      });
+      setAiSettings(saved);
+      setMessage("AI privacy settings saved.");
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "Could not save AI privacy settings.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   useEffect(() => { void load(); }, [load]);
 
@@ -148,6 +173,31 @@ export default function SettingsPage() {
         </button>
       </header>
       {message && <div className="notice" role="status">{message}</div>}
+
+      <section className="content-section">
+        <div className="section-heading compact"><h2>AI Application Agent</h2></div>
+        <p className="page-subtitle">Local-first assistance for interpreting application forms. Final submission, passwords, MFA, CAPTCHA, assessments, and signatures always remain manual.</p>
+        {aiSettings ? (
+          <div className="settings-fields">
+            <label>Privacy mode
+              <select value={aiSettings.ai_mode} onChange={(event) => setAiSettings({ ...aiSettings, ai_mode: event.target.value as AISettings["ai_mode"] })}>
+                <option value="LOCAL_ONLY">Maximum Privacy — local processing only</option>
+                <option value="BALANCED">Balanced — local first, redacted fallback allowed</option>
+                <option value="EXTERNAL_ALLOWED">Best Quality — external help allowed after redaction</option>
+              </select>
+            </label>
+            <div>
+              <strong>Never shared with external AI</strong>
+              <p>Passwords, authentication tokens, MFA/OTP codes, CAPTCHA responses, passport or visa document numbers, government IDs, banking data, medical documents, and electronic signatures.</p>
+            </div>
+            <button className="button secondary" onClick={() => void saveAiSettings()} disabled={busy !== null}><Save size={15} /> Save privacy mode</button>
+          </div>
+        ) : <p>AI privacy controls are unavailable until the application-agent database update finishes.</p>}
+        <div className="target-company-meta">
+          <span>External AI activity: {privacyActivity.length ? `${privacyActivity.length} recent call${privacyActivity.length === 1 ? "" : "s"}` : "None — no data sent"}</span>
+          {privacyActivity[0] && <span>Last: {formatDate(privacyActivity[0].created_at)} · {privacyActivity[0].provider} · {privacyActivity[0].fields_redacted_json.length} fields redacted</span>}
+        </div>
+      </section>
 
       <section className="content-section target-add-form">
         <div className="section-heading compact"><h2>Target Companies</h2></div>

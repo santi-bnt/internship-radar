@@ -1,6 +1,17 @@
 from copy import deepcopy
 
 from app.services.scoring import analyze_job
+from app.services.scoring import _skill_matches
+
+
+def test_java_is_not_inferred_from_verified_c_cpp_python():
+    job = {"title": "Software Intern", "description": "Java C++ Python",
+           "requirements": "Required: Java, C++, Python", "preferred_qualifications": ""}
+    candidate = {"skills_json": ["C", "C++", "Python"]}
+    matched, missing, _, _ = _skill_matches(job, candidate)
+    assert "java" not in matched
+    assert "java" in missing
+    assert "c++" in matched and "python" in matched
 
 
 def test_citizenship_requirement_is_not_eligible(profile, base_job):

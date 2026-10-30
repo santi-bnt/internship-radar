@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from app.main import app
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.models import GeneratedResume, Job
+from app.models import GeneratedResume, Job, JobAnalysis
 from conftest import security_headers
 
 
@@ -51,6 +51,41 @@ def test_jobs_endpoint_filters_by_country_and_score():
         assert payload["items"]
         assert all(job["country"] == "Mexico" for job in payload["items"])
         assert all(job["analysis"]["overall_score"] >= 60 for job in payload["items"])
+
+
+def test_dashboard_listing_search_does_not_match_google_only_in_description():
+    with TestClient(app, headers=security_headers()) as client:
+        with SessionLocal() as db:
+            fixtures = [
+                Job(owner_user_id=settings.primary_user_id, source_name="Test", source_url="https://example.com",
+                    company="Google", title="Student Researcher Intern", location="Mountain View, USA",
+                    apply_url="https://example.com/google", description="Research systems.", raw_data_hash="dashboard-google"),
+                Job(owner_user_id=settings.primary_user_id, source_name="Test", source_url="https://example.com",
+                    company="Five Rings", title="Software Intern", location="New York, USA",
+                    apply_url="https://example.com/five-rings", description="Work with Google Cloud APIs.", raw_data_hash="dashboard-five-rings"),
+                Job(owner_user_id=settings.primary_user_id, source_name="Test", source_url="https://example.com",
+                    company="Sage", title="Engineering Intern", location="Canada",
+                    apply_url="https://example.com/sage", requirements="Experience with Google products.", raw_data_hash="dashboard-sage"),
+            ]
+            db.add_all(fixtures)
+            db.commit()
+            ids = {job.company: job.id for job in fixtures}
+        try:
+            dashboard = client.get("/api/jobs", params={"q": "google", "search_fields": "listing", "page_size": 100})
+            assert dashboard.status_code == 200
+            shown = {job["id"] for job in dashboard.json()["items"]}
+            assert ids["Google"] in shown
+            assert ids["Five Rings"] not in shown
+            assert ids["Sage"] not in shown
+
+            full_text = client.get("/api/jobs", params={"q": "google", "page_size": 100})
+            assert full_text.status_code == 200
+            assert set(ids.values()) <= {job["id"] for job in full_text.json()["items"]}
+        finally:
+            with SessionLocal() as db:
+                for job_id in ids.values():
+                    db.delete(db.get(Job, job_id))
+                db.commit()
 
 
 def test_mark_applied_hides_job_and_undo_restores_it():
@@ -177,3 +212,43 @@ def test_target_company_group_filters_work():
         )
         assert cloud.status_code == 200
         assert job_id in {item["id"] for item in cloud.json()["items"]}
+
+
+def test_jobs_endpoint_orders_by_the_displayed_rating_in_both_directions():
+    with TestClient(app, headers=security_headers()) as client:
+        with SessionLocal() as db:
+            jobs = list(
+                db.scalars(
+                    select(Job)
+                    .join(JobAnalysis)
+                    .where(Job.status == "active")
+                    .limit(2)
+                )
+            )
+            assert len(jobs) == 2
+            for job, score in zip(jobs, (91.0, 27.0), strict=True):
+                job.company = "Rating order fixture"
+                job.analysis.effective_score = score
+                job.analysis.overall_score = score
+                job.analysis.eligibility_status = "ELIGIBLE"
+                job.analysis.recommendation = "Apply Today"
+            db.commit()
+            expected_high_to_low = [job.id for job in jobs]
+
+        highest = client.get(
+            "/api/jobs",
+            params={"company": "Rating order fixture", "rating_order": "highest", "page_size": 10},
+        )
+        assert highest.status_code == 200
+        highest_items = highest.json()["items"]
+        assert [item["id"] for item in highest_items] == expected_high_to_low
+        assert [item["analysis"]["effective_score"] for item in highest_items] == [91.0, 27.0]
+
+        lowest = client.get(
+            "/api/jobs",
+            params={"company": "Rating order fixture", "rating_order": "lowest", "page_size": 10},
+        )
+        assert lowest.status_code == 200
+        lowest_items = lowest.json()["items"]
+        assert [item["id"] for item in lowest_items] == list(reversed(expected_high_to_low))
+        assert [item["analysis"]["effective_score"] for item in lowest_items] == [27.0, 91.0]
