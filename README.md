@@ -6,6 +6,8 @@ The public demo is read-only and must use a separate backend/database. Set `PUBL
 
 ## October 2026 source update
 
+November update: unified ATS/discovery pipeline (including Ashby), source observations and description history, separate fit/eligibility, conservative lifecycle checks, opportunities dashboard and adaptive one-page exports. Optional Freehire/Tavily integrations remain disabled without backend configuration. See [implementation and verification](docs/discovery-update.md). Synthetic candidate data and the read-only public-demo boundary are preserved.
+
 - Job-specific TailoringPlan, candidate evidence mapping, role-aware project/skill decisions and immutable resume versions.
 - Resume Studio, Best Resume, program CVs, verified language/certification evidence and generation queue/reuse controls.
 - Add Job by URL with official-source enrichment, deduplication, SSRF protection and candidate-specific state.

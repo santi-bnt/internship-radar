@@ -8,6 +8,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    opportunity_search_provider: str = "disabled"
+    opportunity_search_api_key: str = ""
+    freehire_enabled: bool = False
+    freehire_use_mode: str = "disabled"
     app_name: str = "Internship Radar API"
     environment: str = "development"
     database_url: str = f"sqlite:///{(BACKEND_DIR / 'internship_radar.db').as_posix()}"

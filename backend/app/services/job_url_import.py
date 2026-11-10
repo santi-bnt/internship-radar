@@ -60,7 +60,15 @@ def _ats_identity(url: str) -> tuple[str, str, str] | None:
             return "greenhouse", parts[0], parts[2]
     if host == "jobs.lever.co" and len(parts) >= 2:
         return "lever", parts[0], parts[1]
+    if host == "jobs.ashbyhq.com" and len(parts) >= 2:
+        return "ashby", parts[0], parts[1]
     if host == "jobs.smartrecruiters.com" and len(parts) >= 2:
+        # SmartRecruiters sometimes publishes localized/deep-link paths as
+        # /ni/{company}/{posting-id}-{slug}, while its canonical board URLs
+        # use /{company}/{posting-id}-{slug}. `ni` is a routing prefix, not
+        # the company identifier.
+        if parts[0].casefold() == "ni" and len(parts) >= 3:
+            parts = parts[1:]
         match = re.match(r"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[A-Za-z0-9]+)", parts[1])
         if match:
             return "smartrecruiters", parts[0], match.group(1)
@@ -92,6 +100,7 @@ async def _ats_job(url: str) -> NormalizedJob | None:
                     continue
                 raw["_listing"] = item
                 raw["externalUrl"] = url
+                raw["_employer_identity"] = "tenant_slug"
                 company = tenant.upper() if len(tenant) <= 3 else tenant.title()
                 adapter = WorkdayAdapter(company, f"{tenant}|{board}", f"https://{host}/{board}")
                 return adapter.normalize_job(raw)
@@ -107,9 +116,21 @@ async def _ats_job(url: str) -> NormalizedJob | None:
             detail = await fetch_job_page(f"https://api.lever.co/v0/postings/{board}/{public_id}")
             raw = json.loads(detail.text)
             employer = raw.get("company") or board
+            if not raw.get("company"):
+                raw["_employer_identity"] = "board_slug"
             company = clean_text(employer.get("name") if isinstance(employer, dict) else employer)
             adapter = LeverAdapter(company, board, f"https://jobs.lever.co/{board}")
             return adapter.normalize_job(raw)
+        elif kind == "ashby":
+            from app.sources.ashby import AshbyAdapter
+            page = await fetch_job_page(f"https://api.ashbyhq.com/posting-api/job-board/{board}")
+            payload = json.loads(page.text)
+            for raw in payload.get("jobs", []):
+                job_id = str(raw.get("id") or urlsplit(raw.get("jobUrl", "")).path.rstrip("/").split("/")[-1])
+                if job_id == public_id and raw.get("isListed", True):
+                    raw["_employer_identity"] = "board_slug"
+                    adapter = AshbyAdapter(board, board, f"https://jobs.ashbyhq.com/{board}")
+                    return adapter.normalize_job(raw)
         elif kind == "smartrecruiters":
             detail = await fetch_job_page(f"https://api.smartrecruiters.com/v1/companies/{board}/postings/{public_id}")
             raw = json.loads(detail.text)
@@ -147,6 +168,17 @@ def _text(value: object) -> str:
     return clean_text(BeautifulSoup(str(value or ""), "html.parser").get_text(" ", strip=True))
 
 
+def _page_job_title(soup: BeautifulSoup) -> str:
+    # Browser-upgrade/accessibility overlays can put an empty h1 before the
+    # actual posting. Prefer job microdata, then the first non-empty heading.
+    for selector in ('[itemprop="title"]', "h1.job-title", "main h1", "article h1", "h1"):
+        for node in soup.select(selector):
+            title = _text(node.get_text(" ", strip=True))
+            if title:
+                return title
+    return ""
+
+
 def _official_link(soup: BeautifulSoup, page_url: str) -> str | None:
     source_host = (urlsplit(page_url).hostname or "").lower()
     third_party = ("linkedin.com", "indeed.com", "simplify.jobs")
@@ -168,6 +200,72 @@ def _embedded_source_job(page: FetchedPage) -> dict | None:
     """Extract official job data embedded in JavaScript-rendered careers pages."""
     host = (urlsplit(page.url).hostname or "").lower()
     soup = BeautifulSoup(page.text, "html.parser")
+
+    if host == "jobs.smartrecruiters.com":
+        identity = _ats_identity(page.url)
+        if not identity or identity[0] != "smartrecruiters":
+            return None
+        expected_uuid = identity[2].casefold()
+        posting_id = None
+        for match in re.finditer(r"['\"]postingId['\"]\s*:\s*['\"]?(\d+)", page.text):
+            context = page.text[match.end():match.end() + 1200]
+            uuid = re.search(r"['\"]postingUuid['\"]\s*:\s*['\"]([0-9a-fA-F-]{36})", context)
+            if uuid and uuid.group(1).casefold() == expected_uuid:
+                posting_id = match.group(1)
+                break
+        title = _page_job_title(soup)
+        qualifications = soup.select_one('[itemprop="qualifications"]')
+        requirements = _text(qualifications.get_text(" ", strip=True)) if qualifications else ""
+        parts = re.split(r"\bPreferred\s*:\s*", requirements, maxsplit=1, flags=re.I)
+        requirements, preferred = parts[0], parts[1] if len(parts) == 2 else ""
+        employment = soup.select_one('[itemprop="employmentType"]')
+        date_posted = soup.select_one('[itemprop="datePosted"]')
+        active_apply = any(
+            re.search(r"\b(apply|i.m interested)\b", node.get_text(" ", strip=True), re.I)
+            for node in soup.select('.job-apply a, [data-sr-track="apply"], .js-oneclick')
+        )
+        locations = []
+        for node in soup.select('[itemprop="jobLocation"]'):
+            formatted = node.select_one('[formattedaddress]')
+            if formatted and formatted.get("formattedaddress"):
+                locations.append(_text(formatted["formattedaddress"]))
+                continue
+            address = []
+            for field in ("addressLocality", "addressRegion", "addressCountry"):
+                value = node.select_one(f'[itemprop="{field}"]')
+                if value:
+                    text = _text(value.get("content") or value.get_text(" ", strip=True))
+                    if text:
+                        address.append(text)
+            locations.append(", ".join(address) or _text(node.get_text(" ", strip=True)))
+        main = soup.select_one('[itemprop="description"]') or soup.find("main") or soup.find("article") or soup.body
+        if main:
+            for node in main.select("script, style, nav, footer, header"):
+                node.decompose()
+            description = _text(main.get_text(" ", strip=True))
+        else:
+            description = ""
+        body_lower = description.casefold()
+        closed = any(term in body_lower for term in (
+            "job is no longer available", "no longer accepting applications",
+            "position has been filled", "job has expired",
+        ))
+        return {
+            "company": identity[1],
+            "title": title,
+            "external_id": posting_id or identity[2],
+            "location": "; ".join(dict.fromkeys(item for item in locations if item)),
+            "description": description,
+            "requirements": requirements,
+            "preferred": preferred,
+            "employment_type": _text(employment.get_text(" ", strip=True)) if employment else "Unknown",
+            "posted_at": date_posted.get("content") if date_posted else None,
+            "expires_at": None,
+            # SmartRecruiters' public page is itself the official application
+            # destination when its public Posting API omits a posting.
+            "apply_url": page.url,
+            "official_status": "closed" if closed else "open" if active_apply else "unknown",
+        }
 
     if host.endswith("jobs.apple.com"):
         for script in soup.select("script"):
@@ -283,7 +381,7 @@ def _generic_job(page: FetchedPage) -> tuple[NormalizedJob, str | None]:
     title = _text(
         embedded.get("title")
         or structured.get("title")
-        or (soup.find("h1").get_text(" ", strip=True) if soup.find("h1") else "")
+        or _page_job_title(soup)
         or (soup.find("meta", property="og:title") or {}).get("content")
     )
     organization = structured.get("hiringOrganization") or {}
@@ -476,6 +574,8 @@ def persist_imported_job(
     else:
         # Preserve candidate lifecycle and attachments while enriching weak
         # source metadata through the same merge used by normal discovery.
+        from app.services.discovery_records import snapshot_description
+        snapshot_description(db, job)
         state = {field: getattr(job, field) for field in (
             "status", "is_active", "applied_at", "archived_at", "expired_at", "submitted_resume_id",
         )}
@@ -511,6 +611,8 @@ def persist_imported_job(
     raw["last_submitted_url"] = submitted_url
     job.raw_data = raw
     persist_analysis(db, job, profile)
+    from app.services.discovery_records import record_discovery
+    record_discovery(db, job, data | {"discovered_from_source": "manual_url", "original_source_url": submitted_url})
     override_error = None
     if force_apply_now:
         if str(job.status or "").casefold() == "applied":

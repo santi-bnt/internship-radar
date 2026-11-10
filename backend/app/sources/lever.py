@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from app.services.source_rate_limit import request_hooks
 
 from app.core.config import settings
 from app.services.normalization import validate_public_url
-from app.sources.base import JobSourceAdapter, NormalizedJob
+from app.sources.base import JobSourceAdapter, NormalizedJob, is_target_internship_title
 
 
 class LeverAdapter(JobSourceAdapter):
@@ -22,6 +23,7 @@ class LeverAdapter(JobSourceAdapter):
     async def fetch_jobs(self) -> list[dict[str, Any]]:
         validate_public_url(self.api_url)
         async with httpx.AsyncClient(
+            event_hooks=request_hooks(),
             timeout=settings.request_timeout_seconds,
             headers={"User-Agent": settings.user_agent},
             follow_redirects=True,
@@ -31,7 +33,10 @@ class LeverAdapter(JobSourceAdapter):
         payload = response.json()
         if not isinstance(payload, list):
             raise ValueError("Lever returned an unexpected payload")
-        return payload
+        self.complete_snapshot = True
+        self.all_external_ids = {str(job.get("id")) for job in payload}
+        self.fetched_count = len(payload)
+        return [job for job in payload if is_target_internship_title(job.get("text", ""))]
 
     def normalize_job(self, raw: dict[str, Any]) -> NormalizedJob:
         categories = raw.get("categories") or {}

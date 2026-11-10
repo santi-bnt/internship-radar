@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.services.email_service import run_daily_digest, run_email_maintenance
 from app.services.search_runs import run_managed_search
 from app.services.discovery_orchestration import DISCOVERY_GROUPS, configured_group_hour, run_discovery_group
+from app.services.unified_discovery import run_due_discovery
 
 
 scheduler = AsyncIOScheduler(timezone=settings.user_timezone)
@@ -13,6 +14,9 @@ def start_scheduler() -> None:
     if not settings.scheduler_enabled or scheduler.running:
         return
     if settings.search_scheduler_enabled:
+        scheduler.add_job(run_due_discovery, "interval", hours=1,
+            id="discovery-due-check", replace_existing=True, max_instances=1,
+            coalesce=True, jitter=max(0, settings.discovery_jitter_seconds))
         for search_type, hours in (
             ("high_priority", settings.high_priority_search_interval_hours),
             ("verification", settings.verify_jobs_interval_hours),

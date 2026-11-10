@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from app.services.source_rate_limit import request_hooks
 
 
 MAX_RESPONSE_BYTES = 2_000_000
@@ -80,6 +81,7 @@ async def fetch_job_page(
     if method not in {"GET", "POST"}:
         raise ValueError("Unsupported job-fetch method")
     async with httpx.AsyncClient(
+        event_hooks=request_hooks(),
         timeout=httpx.Timeout(8, connect=4), follow_redirects=False,
         trust_env=False, headers={"User-Agent": "InternshipRadar/1.0 job-import"},
     ) as client:

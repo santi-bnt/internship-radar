@@ -624,11 +624,12 @@ def _select_kospie_projects(profile: Any, context_terms: list[str], limit: int =
             if sanitize_resume_text(value).lower() in verified_skills
         ][:5]
         repository = _item_value(item, "repository_url", "github_url", "url") or None
+        live_url = _item_value(item, "live_url") or None
         selected.append({
             "name": _item_value(item, "name", "title"), "technologies": technologies,
             "status": _item_value(item, "status"), "dates": _item_value(item, "dates", "date"),
             "github_url": repository if item.get("is_public", True) and _valid_url(repository) else None,
-            "live_url": None, "relevance_score": assessment["score"], "bullets": bullets,
+            "live_url": live_url if _valid_url(live_url) else None, "relevance_score": assessment["score"], "bullets": bullets,
         })
     preferred_order = {
         name: index for index, name in enumerate(KOSPIE_CV_PROJECT_ORDER)

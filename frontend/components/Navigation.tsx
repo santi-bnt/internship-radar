@@ -21,6 +21,7 @@ import { isPublicDemoMode } from "@/lib/access";
 const links = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
+  { href: "/opportunities", label: "Opportunities", icon: Radar },
   { href: "/applications", label: "Applications", icon: Send },
   { href: "/resume-studio", label: "Resume Studio", icon: FileText },
   { href: "/talent-communities", label: "Talent Communities", icon: Building2 },

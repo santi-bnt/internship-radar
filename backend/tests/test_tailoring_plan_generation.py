@@ -20,7 +20,7 @@ from app.services.seed import (
 from app.services.tailoring_plan import TailoringPlan, build_tailoring_plan, decide_resume_content, job_content_hash
 
 
-def santiago_profile(user_id: str = "santiago") -> SimpleNamespace:
+def demo_profile(user_id: str = "santiago") -> SimpleNamespace:
     """A scoped regression profile containing Santiago's verified project evidence."""
     projects = [deepcopy(INTERNSHIP_RADAR_PROJECT), *deepcopy(VERIFIED_RESUME_PROJECTS)]
     return SimpleNamespace(
@@ -87,7 +87,7 @@ def plan_decisions(content):
 
 
 def test_santiago_regression_plans_differ_for_security_solutions_embedded_and_fpga():
-    profile = santiago_profile()
+    profile = demo_profile()
     security = generate_local_content(scoped_job(
         "Security Consultant Intern",
         "Python, RESTful APIs, Linux, testing, and debugging are required. "
@@ -112,11 +112,11 @@ def test_santiago_regression_plans_differ_for_security_solutions_embedded_and_fp
 
     assert project_names(security) != project_names(embedded)
     assert "Internship Radar - AI Resume Tailoring Platform" in project_names(security)
-    assert "SkiliAir Air Quality Monitoring System" in project_names(security)
+    assert "Environmental Sensor Dashboard" in project_names(security)
     assert "Internship Radar - AI Resume Tailoring Platform" in project_names(solutions)
-    assert "SkiliAir Air Quality Monitoring System" in project_names(solutions)
-    assert {"FreeRTOS Event-Driven System", "MATT Web-Controlled Writing Robot", "Intel MAX 10 Robotic Arm Controller"} <= set(project_names(embedded))
-    assert project_names(fpga)[0] == "Intel MAX 10 Robotic Arm Controller"
+    assert "Environmental Sensor Dashboard" in project_names(solutions)
+    assert {"Embedded Telemetry Gateway", "Autonomous Lab Rover", "FPGA Signal Processor"} <= set(project_names(embedded))
+    assert project_names(fpga)[0] == "FPGA Signal Processor"
     assert {"Verilog", "SystemVerilog", "FPGA"} <= set(fpga.selected_skills)
 
     security_decisions = plan_decisions(security)
@@ -125,7 +125,7 @@ def test_santiago_regression_plans_differ_for_security_solutions_embedded_and_fp
 
 
 def test_google_security_consultant_keeps_overlapping_security_roles_and_truthful_resume():
-    profile = santiago_profile()
+    profile = demo_profile()
     job = scoped_job(
         "Google Security Consultant Intern",
         "Python, RESTful APIs, Linux, testing, and debugging are required. "
@@ -147,22 +147,23 @@ def test_google_security_consultant_keeps_overlapping_security_roles_and_truthfu
     ]
     assert content.classification == "Security / Consulting"
     assert "Security Consulting" in content.headline
-    assert "Security Consulting role" in content.summary
+    assert "For this role" not in content.summary
+    assert "with hands-on project experience" in content.summary
     assert "Software Engineering role" not in content.summary
-    assert {"Internship Radar - AI Resume Tailoring Platform", "SkiliAir Air Quality Monitoring System"} <= set(project_names(content))
+    assert {"Internship Radar - AI Resume Tailoring Platform", "Environmental Sensor Dashboard"} <= set(project_names(content))
     assert not {"Penetration Testing", "Malware Analysis", "SIEM", "SOC", "Incident Response"} & set(content.selected_skills)
 
 
 def test_role_aware_project_evidence_changes_rankings_without_project_templates():
-    profile = santiago_profile()
+    profile = demo_profile()
     security = generate_local_content(scoped_job(
         "Google Security Consultant Intern",
         "Python, RESTful APIs, Linux, testing, and debugging are required.",
         description="Support system security reviews and validate secure integrations.",
     ), profile)
     security_scores = plan_decisions(security)["selected_project_scores"]
-    assert security_scores["Internship Radar - AI Resume Tailoring Platform"] > security_scores["Königsberg Graph Game"]
-    assert security_scores["SkiliAir Air Quality Monitoring System"] > security_scores["Königsberg Graph Game"]
+    assert security_scores["Internship Radar - AI Resume Tailoring Platform"] > security_scores["Route Optimization Engine"]
+    assert security_scores["Environmental Sensor Dashboard"] > security_scores["Route Optimization Engine"]
     assert "Role evidence: backend or API evidence." in " ".join(
         plan_decisions(security)["selected_project_reasons"]["Internship Radar - AI Resume Tailoring Platform"]
     )
@@ -172,7 +173,7 @@ def test_role_aware_project_evidence_changes_rankings_without_project_templates(
         "C, C++, FreeRTOS, microcontrollers, UART, PWM, and hardware/software integration are required.",
         description="Develop, test, and debug real-time firmware for embedded systems.",
     ), profile)
-    assert {"FreeRTOS Event-Driven System", "MATT Web-Controlled Writing Robot", "Intel MAX 10 Robotic Arm Controller"} <= set(project_names(embedded)[:3])
+    assert {"Embedded Telemetry Gateway", "Autonomous Lab Rover", "FPGA Signal Processor"} <= set(project_names(embedded)[:3])
     assert "Internship Radar - AI Resume Tailoring Platform" not in project_names(embedded)[:3]
 
     fpga = generate_local_content(scoped_job(
@@ -180,14 +181,14 @@ def test_role_aware_project_evidence_changes_rankings_without_project_templates(
         "FPGA, Verilog, SystemVerilog, digital design, RTL, simulation, and testing are required.",
         description="Design and validate RTL modules for programmable logic.",
     ), profile)
-    assert project_names(fpga)[0] == "Intel MAX 10 Robotic Arm Controller"
+    assert project_names(fpga)[0] == "FPGA Signal Processor"
 
     software = generate_local_content(scoped_job(
         "Software Engineering Intern",
         "C++, algorithms, data structures, backend, software architecture, testing, and debugging are required.",
         description="Build reliable software systems.",
     ), profile)
-    assert project_names(software)[:2] == ["Königsberg Graph Game", "Stock Exchange Matching Engine"]
+    assert project_names(software)[:2] == ["Route Optimization Engine", "Market Simulation Engine"]
 
 
 def test_automotive_mcu_npi_uses_embedded_role_and_projects_instead_of_graph_game():
@@ -205,11 +206,11 @@ def test_automotive_mcu_npi_uses_embedded_role_and_projects_instead_of_graph_gam
     assert classify_job(job) == "Embedded / Firmware"
     assert weighted_role_categories(job)["EMBEDDED"] > weighted_role_categories(job).get("SOFTWARE_ENGINEERING", 0)
 
-    content = generate_local_content(job, santiago_profile())
+    content = generate_local_content(job, demo_profile())
     decisions = plan_decisions(content)
     assert decisions["primary_role_category"] == "Embedded / Firmware"
     assert "Embedded / Firmware" in content.tailoring_plan["role_categories"]
-    assert "Königsberg Graph Game" not in project_names(content)
+    assert "Route Optimization Engine" not in project_names(content)
     assert any(
         term in " ".join(project_names(content)).lower()
         for term in ("motor", "freertos", "matt", "kl25z", "ble", "embedded")
@@ -217,10 +218,10 @@ def test_automotive_mcu_npi_uses_embedded_role_and_projects_instead_of_graph_gam
 
     # Existing immutable snapshots with the previous classification are not
     # reused for a new generation even though the job text/hash is unchanged.
-    stale_plan = resume_generation.build_tailoring_plan(job, santiago_profile(), owner_user_id="santiago")
+    stale_plan = resume_generation.build_tailoring_plan(job, demo_profile(), owner_user_id="santiago")
     stale_plan.role_categories = ["Software Engineering"]
     refreshed = _scoped_tailoring_plan(
-        job, santiago_profile(), project_limit=4, existing_plan=stale_plan,
+        job, demo_profile(), project_limit=4, existing_plan=stale_plan,
     )
     assert refreshed is not None
     assert "Embedded / Firmware" in refreshed.role_categories
@@ -228,7 +229,7 @@ def test_automotive_mcu_npi_uses_embedded_role_and_projects_instead_of_graph_gam
 
 
 def test_generated_resume_uses_plan_not_legacy_project_priority_lists(monkeypatch):
-    profile = santiago_profile()
+    profile = demo_profile()
     job = scoped_job(
         "FPGA Design Intern",
         "FPGA, Verilog, SystemVerilog, digital design, and PWM are required.",
@@ -238,12 +239,12 @@ def test_generated_resume_uses_plan_not_legacy_project_priority_lists(monkeypatc
     content = generate_local_content(job, profile)
 
     assert content.tailoring_plan["resume_decisions"]["status"] == "PLANNED"
-    assert project_names(content)[0] == "Intel MAX 10 Robotic Arm Controller"
+    assert project_names(content)[0] == "FPGA Signal Processor"
     assert plan_decisions(content)["selected_projects"] == project_names(content)
 
 
 def test_asic_and_software_decisions_remain_role_specific_after_layout_adjustment(monkeypatch):
-    profile = santiago_profile()
+    profile = demo_profile()
     asic_job = scoped_job(
         "Amazon ASIC Engineer Intern - Annapurna Labs",
         "Verilog, SystemVerilog, FPGA, Digital Design, RTL, hardware validation, embedded systems, C, and C++ are required.",
@@ -262,7 +263,7 @@ def test_asic_and_software_decisions_remain_role_specific_after_layout_adjustmen
     software = generate_local_content(software_job, profile)
 
     assert classify_job(asic_job) == "FPGA / Digital Design"
-    assert project_names(asic)[0] == "Intel MAX 10 Robotic Arm Controller"
+    assert project_names(asic)[0] == "FPGA Signal Processor"
     assert {"Verilog", "SystemVerilog", "FPGA", "Digital Logic", "C", "C++"} <= set(asic.selected_skills)
     assert {"Python", "C++", "Algorithms", "Data Structures"} <= set(software.selected_skills)
     assert plan_decisions(asic)["selected_projects"] == project_names(asic)
@@ -282,7 +283,7 @@ def test_asic_and_software_decisions_remain_role_specific_after_layout_adjustmen
 
 
 def test_plan_snapshot_is_immutable_when_a_later_resume_is_generated():
-    profile = santiago_profile()
+    profile = demo_profile()
     software = generate_local_content(scoped_job(
         "Solutions Engineering Intern", "Python, REST APIs, FastAPI, Flask, and debugging are required."
     ), profile)
@@ -297,7 +298,7 @@ def test_plan_snapshot_is_immutable_when_a_later_resume_is_generated():
 
 
 def test_sequential_resume_generation_is_isolated_by_job_and_plan_snapshot():
-    profile = santiago_profile()
+    profile = demo_profile()
     security_job = scoped_job(
         "Google Security Consultant Intern",
         "Python, RESTful APIs, Linux, testing, and debugging are required.",
@@ -324,7 +325,8 @@ def test_sequential_resume_generation_is_isolated_by_job_and_plan_snapshot():
     assert "Software Engineering" in software_resume.headline
     assert "Security Consulting" not in software_resume.headline
     assert "Cybersecurity" not in software_resume.headline
-    assert "For this Software Engineering role" in software_resume.summary
+    assert "For this Software Engineering role" not in software_resume.summary
+    assert "with hands-on project experience" in software_resume.summary
     assert "Security Consulting role" not in software_resume.summary
     assert "Cybersecurity role" not in software_resume.summary
     assert software_resume.tailoring_trace["classification"] == "Software Engineering"
@@ -340,7 +342,7 @@ def test_sequential_resume_generation_is_isolated_by_job_and_plan_snapshot():
 
 
 def test_job_b_always_builds_its_own_plan_after_generating_job_a():
-    profile = santiago_profile()
+    profile = demo_profile()
     job_a = scoped_job(
         "Security Consultant Intern",
         "Python, Linux, RESTful APIs, testing, and debugging are required.",
@@ -364,7 +366,7 @@ def test_job_b_always_builds_its_own_plan_after_generating_job_a():
 
 
 def test_five_rings_link_plan_is_bound_to_current_job_and_requirements():
-    profile = santiago_profile()
+    profile = demo_profile()
     prior_job = scoped_job("Embedded Intern", "C, FreeRTOS, UART, and PWM required.", job_id=1301)
     generate_local_content(prior_job, profile)
     link = scoped_job(
@@ -392,7 +394,7 @@ def test_five_rings_link_plan_is_bound_to_current_job_and_requirements():
 
 
 def test_changed_job_content_invalidates_the_old_plan_but_keeps_the_old_snapshot_immutable():
-    profile = santiago_profile()
+    profile = demo_profile()
     job = scoped_job(
         "Software Engineering Intern",
         "C++, Python, algorithms, and testing are required.",
@@ -412,11 +414,11 @@ def test_changed_job_content_invalidates_the_old_plan_but_keeps_the_old_snapshot
 
 
 def test_another_users_plan_is_rebuilt_from_the_current_users_evidence():
-    alpha = santiago_profile("alpha")
-    beta = santiago_profile("beta")
+    alpha = demo_profile("alpha")
+    beta = demo_profile("beta")
     beta.skills_json = ["C", "C++", "FreeRTOS", "UART", "PWM", "Microcontrollers", "Testing", "Debugging"]
     beta.projects_json = [project for project in beta.projects_json if project["name"] in {
-        "FreeRTOS Event-Driven System", "MATT Web-Controlled Writing Robot",
+        "Embedded Telemetry Gateway", "Autonomous Lab Rover",
     }]
     alpha_job = scoped_job("Backend Intern", "Python and REST APIs required.", user_id="alpha", job_id=1501)
     beta_job = scoped_job("Firmware Intern", "C, FreeRTOS, UART, and PWM required.", user_id="beta", job_id=1502)
@@ -430,10 +432,10 @@ def test_another_users_plan_is_rebuilt_from_the_current_users_evidence():
 
 
 def test_planned_resume_never_uses_another_users_evidence():
-    alpha = santiago_profile("alpha")
-    beta = santiago_profile("beta")
+    alpha = demo_profile("alpha")
+    beta = demo_profile("beta")
     beta.projects_json = [project for project in beta.projects_json if project["name"] in {
-        "FreeRTOS Event-Driven System", "MATT Web-Controlled Writing Robot",
+        "Embedded Telemetry Gateway", "Autonomous Lab Rover",
     }]
     beta.skills_json = ["C", "C++", "FreeRTOS", "GPIO", "PWM", "Microcontrollers", "Testing", "Debugging", "UART"]
     alpha_resume = generate_local_content(scoped_job(

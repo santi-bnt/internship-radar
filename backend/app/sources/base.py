@@ -172,6 +172,8 @@ class NormalizedJob:
 
 
 class JobSourceAdapter(ABC):
+    # Only a successful unfiltered board snapshot may establish absence.
+    complete_snapshot = False
     def __init__(
         self,
         company: str,

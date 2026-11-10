@@ -1,3 +1,5 @@
+from app.models.opportunities import OpportunityTracking
+from app.models.discovery import OpportunitySourceObservation, OpportunityDiscoveryState, JobDescriptionSnapshot
 from app.models.entities import (
     AIDecisionLog,
     AIUserSettings,

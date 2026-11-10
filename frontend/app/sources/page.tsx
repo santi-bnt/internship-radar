@@ -209,6 +209,7 @@ export default function SourcesPage() {
             <select value={form.source_type} onChange={(e) => setForm({ ...form, source_type: e.target.value })}>
               <option value="greenhouse">Greenhouse</option>
               <option value="lever">Lever</option>
+              <option value="ashby">Ashby</option>
               <option value="workday">Workday</option>
               <option value="smartrecruiters">SmartRecruiters</option>
               <option value="amazon_jobs">Amazon Jobs</option>
@@ -234,6 +235,7 @@ export default function SourcesPage() {
             </select>
           </label>
           <label>Priority<input type="number" min="0" max="100" value={form.priority} onChange={(e) => setForm({ ...form, priority: Number(e.target.value), base_priority: Number(e.target.value) })} /></label>
+          <label>Refresh cadence<select value={form.refresh_frequency} onChange={e => setForm({...form, refresh_frequency: e.target.value})}><option value="daily">Automatic by source</option><option value="6h">Every 6 hours</option><option value="12h">Every 12 hours</option><option value="24h">Every 24 hours</option><option value="48h">Every 48 hours</option><option value="72h">Every 72 hours</option></select></label>
           <button className="button secondary" type="submit"><Plus size={16} /> Add source</button>
         </form>
       </section>

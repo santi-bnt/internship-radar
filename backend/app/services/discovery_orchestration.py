@@ -14,10 +14,11 @@ from app.core.config import settings
 from app.db.init_db import init_db
 from app.db.session import SessionLocal
 from app.models import CompanySource, Job
+from app.services.source_catalog import source_hours
 
 
 DISCOVERY_GROUPS = (
-    "DIRECT", "GREENHOUSE", "LEVER", "WORKDAY", "SMARTRECRUITERS",
+    "DIRECT", "GREENHOUSE", "LEVER", "ASHBY", "WORKDAY", "SMARTRECRUITERS", "EXTERNAL", "WEB_RESEARCH",
     "SEMICONDUCTOR", "SOFTWARE_CLOUD", "ROBOTICS_AUTOMOTIVE", "CANADA",
 )
 # Each group receives a different daily window.  The hour is configurable at
@@ -61,6 +62,12 @@ def source_group(source: Any) -> str:
         return "GREENHOUSE"
     if kind == "lever":
         return "LEVER"
+    if kind == "ashby":
+        return "ASHBY"
+    if kind in {"freehire", "jobspy"}:
+        return "EXTERNAL"
+    if kind in {"web_search", "research"}:
+        return "WEB_RESEARCH"
     if kind == "workday":
         return "WORKDAY"
     if kind == "smartrecruiters":
@@ -85,6 +92,11 @@ def stable_jitter_seconds(source: Any, *, max_seconds: int | None = None) -> int
 
 def refresh_interval_hours(source: Any) -> int:
     frequency = str(getattr(source, "refresh_frequency", "daily")).casefold()
+    if frequency.endswith("h") and frequency[:-1].isdigit():
+        return max(1, min(168, int(frequency[:-1])))
+    cadence = source_hours(str(getattr(source, "source_type", "")).lower())
+    if cadence:
+        return cadence
     if frequency in {"hourly", "fast", "high"}:
         return 4
     if frequency in {"weekly", "slow"}:
@@ -93,6 +105,13 @@ def refresh_interval_hours(source: Any) -> int:
 
 
 def source_is_due(source: Any, now: datetime) -> bool:
+    kind = str(getattr(source, "source_type", ""))
+    if kind == "manual":
+        return False
+    if kind == "freehire" and not (settings.freehire_enabled and settings.freehire_use_mode in {"personal", "licensed"}):
+        return False
+    if kind in {"web_search", "research"} and not (settings.opportunity_search_provider == "tavily" and settings.opportunity_search_api_key):
+        return False
     for field in ("rate_limited_until", "backoff_until", "next_run_at"):
         value = _aware(getattr(source, field, None))
         if value and value > now:
@@ -206,7 +225,7 @@ async def run_discovery_group(group: str, trigger: str = "scheduler") -> dict[st
     async with _GLOBAL_SEMAPHORE:
         with SessionLocal() as db:
             db.info["owner_user_id"] = settings.effective_primary_user_id
-            summary = await refresh_all_sources(db, source_ids=source_ids)
+            summary = await refresh_all_sources(db, source_ids=source_ids, send_notifications=False)
     return {"group": group, "queued": len(source_ids), **summary}
 
 

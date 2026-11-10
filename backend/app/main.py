@@ -605,6 +605,8 @@ async def protect_private_api(request: Request, call_next):
         return await call_next(request)
     if not path.startswith("/api/"):
         return JSONResponse({"detail": "Resource not found."}, status_code=404)
+    if settings.public_demo_mode and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        return JSONResponse({"detail": "Read-only public demo."}, status_code=403, headers={"Cache-Control": "no-store"})
     local_development = (
         settings.local_development_mode
         and settings.environment.strip().lower() != "production"
@@ -3714,3 +3716,8 @@ def get_stats(
 
 from app.talent_api import router as talent_router
 app.include_router(talent_router)
+
+from app.discovery_api import router as discovery_router
+from app.opportunities_api import router as opportunities_router
+app.include_router(discovery_router)
+app.include_router(opportunities_router)

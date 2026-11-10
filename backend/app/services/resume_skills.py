@@ -39,6 +39,7 @@ SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "FPGA Design": ("fpga design", "fpga development"),
     "Digital Logic": ("digital logic", "logic design"),
     "Hardware Debugging": ("hardware debugging", "board-level debugging"),
+    "Oscilloscope": ("oscilloscope", "oscilloscopes"),
     "Software Debugging": ("software debugging", "debugging software"),
     "Software Validation": (
         "software validation", "software verification", "system validation",
@@ -55,8 +56,10 @@ SKILL_CATEGORY: dict[str, str] = {
         "SystemVerilog",
     )},
     **{name: "Embedded / Systems" for name in (
+        "ESP32-S3", "Arduino", "PID Control", "Discrete PID Control", "DC Motor Control",
+        "Feedback Control", "Real-Time Control", "Bluetooth Low Energy",
         "FreeRTOS", "Embedded Systems", "Firmware", "Linux", "Microcontrollers",
-        "FRDM-KL25Z", "ESP32", "Raspberry Pi", "Interrupts", "Mutexes",
+        "FRDM-KL25Z", "ESP32", "Raspberry Pi", "STM32F401", "Interrupts", "Mutexes",
         "Semaphores", "Queues", "Tasks", "ISRs", "Timers", "Concurrent Programming",
         "Multithreaded Programming", "Hardware/Software Integration", "File I/O",
         "Robotics", "Controls", "ROS", "Computer Vision", "OpenCV",
@@ -67,7 +70,8 @@ SKILL_CATEGORY: dict[str, str] = {
         "Full-Stack Development", "Auth.js",
     )},
     **{name: "Hardware" for name in (
-        "FPGA", "FPGA Design", "Intel MAX 10", "Digital Logic", "Digital Design",
+        "BTS7960", "DAC", "Incremental Encoder Feedback", "Encoder Feedback",
+        "FPGA", "FPGA Design", "Intel MAX 10", "Digital Logic", "Digital Design", "KiCad",
         "UART", "SPI", "I2C", "GPIO", "ADC", "PWM", "Electronics", "PCB",
     )},
     **{name: "Development" for name in (
@@ -75,6 +79,7 @@ SKILL_CATEGORY: dict[str, str] = {
         "Graph Algorithms", "Path Validation", "API Development",
     )},
     **{name: "Debug & Validation" for name in (
+        "Simulation", "Testbenches",
         "Hardware Debugging", "Software Debugging", "Software Validation", "Testing",
         "Debugging", "Oscilloscope", "Logic Analyzer",
     )},

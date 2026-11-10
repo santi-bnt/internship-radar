@@ -50,6 +50,7 @@ async def search_target_companies(
         }
     try:
         should_refresh = bool(selected) and (company_id is None or bool(source_ids))
+        db.info["respect_discovery_cadence"] = not force
         summary = await refresh_all_sources(db, source_ids=source_ids) if should_refresh else {
             "jobs_fetched": 0,
             "jobs_created": 0,

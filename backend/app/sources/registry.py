@@ -3,6 +3,10 @@ from app.sources.base import JobSourceAdapter
 from app.sources.embedded_jobs import EmbeddedJobsAdapter
 from app.sources.greenhouse import GreenhouseAdapter
 from app.sources.lever import LeverAdapter
+from app.sources.ashby import AshbyAdapter
+from app.sources.external import ManualSource
+from app.sources.freehire import FreehireSource
+from app.sources.web_search import WebSearchSource, ResearchOpportunitySource
 from app.sources.local_json import LocalJsonAdapter
 from app.sources.official_careers import OfficialCareersAdapter
 from app.sources.oracle_recruiting import OracleRecruitingAdapter
@@ -15,6 +19,11 @@ ADAPTERS: dict[str, type[JobSourceAdapter]] = {
     "local_json": LocalJsonAdapter,
     "greenhouse": GreenhouseAdapter,
     "lever": LeverAdapter,
+    "ashby": AshbyAdapter,
+    "manual": ManualSource,
+    "freehire": FreehireSource,
+    "web_search": WebSearchSource,
+    "research": ResearchOpportunitySource,
     "embedded_jobs": EmbeddedJobsAdapter,
     "amazon_jobs": AmazonJobsAdapter,
     "official_careers": OfficialCareersAdapter,

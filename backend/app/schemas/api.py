@@ -859,6 +859,7 @@ class ResumeExperienceItem(BaseModel):
 
 class ResumeProjectItem(BaseModel):
     name: str
+    display_name: str = ""
     project_type_label: str = ""
     technologies: list[str] = Field(default_factory=list)
     status: str = ""
@@ -917,9 +918,13 @@ class TailoredResumeContent(BaseModel):
     classification: str
     headline: str
     summary: str
-    skill_categories: list[ResumeSkillGroup] = Field(default_factory=list, max_length=4)
-    selected_skills: list[str] = Field(default_factory=list, max_length=16)
-    job_skill_matches: list[ResumeSkillMatch] = Field(default_factory=list, max_length=16)
+    skill_categories: list[ResumeSkillGroup] = Field(default_factory=list, max_length=6)
+    selected_skills: list[str] = Field(default_factory=list, max_length=32)
+    job_skill_matches: list[ResumeSkillMatch] = Field(default_factory=list, max_length=32)
+    presentation_profile: str = ""
+    skill_display_names: dict[str, str] = Field(default_factory=dict)
+    section_spacing_reduction: float = Field(default=0, ge=0, le=2)
+    compact_coursework: bool = False
     skill_verification: ResumeSkillVerification = Field(default_factory=ResumeSkillVerification)
     education: ResumeEducationItem
     experience: list[ResumeExperienceItem] = Field(default_factory=list)

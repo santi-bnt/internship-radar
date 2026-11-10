@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from app.services.source_rate_limit import request_hooks
 
 from app.core.config import settings
 from app.services.normalization import validate_public_url
@@ -43,6 +44,7 @@ class SmartRecruitersAdapter(JobSourceAdapter):
         """Fetch named public requisitions without widening a source scan."""
         requested = {str(item).strip() for item in posting_ids if str(item).strip()}
         async with httpx.AsyncClient(
+            event_hooks=request_hooks(),
             timeout=settings.request_timeout_seconds,
             headers={"User-Agent": settings.user_agent},
             follow_redirects=True,
@@ -77,6 +79,7 @@ class SmartRecruitersAdapter(JobSourceAdapter):
     async def fetch_jobs(self) -> list[dict[str, Any]]:
         validate_public_url(self.api_url)
         async with httpx.AsyncClient(
+            event_hooks=request_hooks(),
             timeout=settings.request_timeout_seconds,
             headers={"User-Agent": settings.user_agent},
             follow_redirects=True,
@@ -106,7 +109,7 @@ class SmartRecruitersAdapter(JobSourceAdapter):
                 if is_target_internship_title(item.get("name", ""))
                 and self._is_supported_location(item)
             ]
-            semaphore = asyncio.Semaphore(5)
+            semaphore = asyncio.Semaphore(max(1, settings.discovery_per_domain_concurrency))
 
             async def fetch_detail(listing: dict[str, Any]) -> dict[str, Any] | None:
                 posting_id = listing.get("id")

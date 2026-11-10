@@ -28,6 +28,7 @@ from app.schemas.api import (
     ResumeSkillVerification,
     TailoredResumeContent,
 )
+from app.services.project_evidence import project_role_view, implemented_claims
 from app.services.language_evidence import resume_language_lines
 from app.services.resume_skills import (
     build_verified_skill_registry,
@@ -43,6 +44,7 @@ from app.services.tailoring_plan import (
     decide_resume_content,
     job_content_hash,
     _primary_resume_role_category,
+    _role_evidence_family, _skill_categories_from_plan, select_relevant_coursework, is_electrical_validation_role, _demonstrated_capabilities,
     _role_categories,
 )
 from app.services.ai_privacy import CandidateAIContextBuilder
@@ -110,6 +112,8 @@ VALID_CLASSIFICATIONS = {
     "Security / Consulting",
 }
 VALID_SKILL_CATEGORIES = {
+    "Embedded & Systems", "Hardware & Digital Design", "Lab & Test Equipment", "Software",
+    "Embedded & Hardware", "Control & Communication",
     "Digital Systems & Hardware",
     "Engineering Tools",
     "Languages",
@@ -131,6 +135,7 @@ VALID_SKILL_CATEGORIES = {
     "Backend / Data",
     "Web & APIs", "Data", "Software Engineering", "RTOS", "Protocols",
 }
+
 ACTION_VERBS = {
     "added", "analyzed", "automated", "built", "configured", "created", "debugged",
     "designed", "developed", "implemented", "integrated", "modeled",
@@ -617,12 +622,12 @@ def validate_generated_resume(
     verified_registry = build_verified_skill_registry(verified_profile)
     if any(interest not in verified_registry for interest in content.research_interests):
         raise ValueError("Research interests must be derived from verified profile skills.")
-    if not 2 <= len(content.skill_categories) <= 4:
-        raise ValueError("Resume must contain two to four skill categories.")
+    if not 2 <= len(content.skill_categories) <= 6:
+        raise ValueError("Resume must contain two to six skill categories.")
     total_skills = sum(len(group.items) for group in content.skill_categories)
     minimum_skills = min(8, len(verified_registry))
-    if not minimum_skills <= total_skills <= 16:
-        raise ValueError("Resume must contain approximately eight to sixteen verified skills.")
+    if not minimum_skills <= total_skills <= 24:
+        raise ValueError("Resume must contain approximately eight to twenty-four verified skills.")
     flattened_skills = [item for group in content.skill_categories for item in group.items]
     if flattened_skills != content.selected_skills:
         raise ValueError("Selected skills must match the rendered skill categories.")
@@ -631,8 +636,8 @@ def validate_generated_resume(
     for group in content.skill_categories:
         if group.name not in VALID_SKILL_CATEGORIES:
             raise ValueError(f"Unsupported skill category: {group.name}")
-        if not 2 <= len(group.items) <= 8:
-            raise ValueError(f"Skill category {group.name} must contain two to eight items.")
+        if not 1 <= len(group.items) <= 8:
+            raise ValueError(f"Skill category {group.name} must contain one to eight items.")
         unsupported = [
             item for item in group.items
             if item not in verified_registry
@@ -695,7 +700,7 @@ def validate_generated_resume(
                 raise ValueError("Generated resume contains duplicate project bullets.")
             seen_bullets.add(normalized_bullet)
 
-    course_limit = 8 if is_kospie else 4 if content.application_type == "PROFILE_PORTFOLIO" else 2
+    course_limit = 8 if is_kospie else 5 if content.compact_coursework else 4 if content.application_type == "PROFILE_PORTFOLIO" else 2
     if len(content.coursework) > course_limit:
         raise ValueError(f"Resume may contain at most {course_limit} courses.")
     verified_courses = {
@@ -1154,6 +1159,21 @@ def score_project_for_job(
             value for value in technologies if _keyword_present(value, job_text)
         }
         score += min(18, len(matched_technologies) * 3)
+        if classification == "Embedded / Firmware":
+            # Distinguish concrete control implementations from shared MCU/PID
+            # tags. Roadmap entries and pending work cannot establish a match.
+            implemented = " ".join(implemented_claims([
+                *(item.get("bullets") or []), *(item.get("verified_features") or []),
+            ])).lower()
+            control_signals = (
+                ("analog reference",), ("discrete pid",), ("adc",), ("dac",),
+                ("encoder", "encoder feedback"), ("pwm",),
+            )
+            score += min(24, 8 * sum(
+                any(_keyword_present(term, job_text) for term in aliases)
+                and any(_keyword_present(term, implemented) for term in aliases)
+                for aliases in control_signals
+            ))
         if (
             name == "Stock Exchange Matching Engine"
             and classification == "Software Engineering"
@@ -1556,25 +1576,27 @@ def _projects_from_tailoring_plan(
 ) -> list[dict[str, Any]]:
     sources = _profile_project_map(profile)
     registry = build_verified_skill_registry(profile)
-    selected_skill_order = {
-        skill: index for index, skill in enumerate(plan.resume_decisions.selected_skills)
-    }
     projects: list[dict[str, Any]] = []
     for name in plan.resume_decisions.selected_projects:
         source = sources.get(name)
         if source is None:
             continue
+        source = project_role_view(source, _role_evidence_family(plan.role_categories))
         technologies = [
             canonicalize_skill(value)
             for value in source.get("technologies", [])
             if canonicalize_skill(value) in registry
         ]
         technologies = list(dict.fromkeys(technologies))
-        technologies.sort(key=lambda item: selected_skill_order.get(item, len(selected_skill_order)))
+        # Preserve each project's own technical context; the first project's
+        # high-ranked global skills must not reorder every other project's tags.
+        if "FPGA" in technologies and "FPGA Design" in technologies:
+            technologies.remove("FPGA Design")
         repository_url = _item_value(source, "repository_url", "github_url", "url") or None
         live_url = _item_value(source, "live_url") or None
         projects.append({
             "name": name,
+            "display_name": _item_value(source, "resume_display_name"),
             "technologies": technologies[:5],
             "status": _item_value(source, "status"),
             "dates": _item_value(source, "dates", "date"),
@@ -1677,6 +1699,9 @@ def _headline_from_tailoring_plan(profile: Any, plan: TailoringPlan) -> str:
     # treats it as candidate-owned contact/profile evidence) while adding only
     # as much job direction as the four-part rendering limit permits.
     profile_headline = sanitize_resume_text(profile.headline)
+    research = _research_narrative(profile, plan)
+    if research:
+        return profile_headline + " | " + research[0]
     parts = [item.strip() for item in profile_headline.split("|") if item.strip()]
     for item in plan.resume_decisions.headline_direction.split("|"):
         cleaned = item.strip()
@@ -1685,22 +1710,21 @@ def _headline_from_tailoring_plan(profile: Any, plan: TailoringPlan) -> str:
     return " | ".join(parts)
 
 
+
 def _summary_from_tailoring_plan(profile: Any, plan: TailoringPlan) -> str:
-    decisions = plan.resume_decisions
-    role = decisions.primary_role_category or (plan.role_categories[0] if plan.role_categories else "Engineering")
-    projects = ", ".join(decisions.selected_projects[:2]) or "technical projects"
-    skills = ", ".join(decisions.selected_skills[:4]) or "engineering skills"
-    covered = [
-        item.requirement.normalized_requirement
-        for item in plan.requirement_evidence
-        if item.match_state != SkillMatchState.NOT_FOUND and item.requirement.type == "technology"
-    ]
-    requirements = ", ".join(covered[:3]) or "the stated role requirements"
-    return (
-        f"{sanitize_resume_text(profile.headline)} with hands-on project experience in {skills}. "
-        f"For this {role} role, brings evidence from {projects} to address {requirements}. "
-        "Emphasizes implementation, integration, testing, and debugging through documented technical work."
-    )
+    research = _research_narrative(profile, plan)
+    if research:
+        return research[1]
+    family = _role_evidence_family(plan.role_categories)
+    registry = build_verified_skill_registry(profile)
+    if family == "validation" and {"Linux", "FPGA", "Electronics"} <= set(registry):
+        return (
+            "Robotics and Digital Systems Engineering student with hands-on project experience in embedded systems, "
+            "electronics, Linux, FPGA development, and hardware-software integration. Work includes sensor acquisition, "
+            "real-time control, testbench simulation, and physical prototypes. Interested in electrical validation, "
+            "hardware testing, and system-level troubleshooting."
+        ) if "Robotics and Digital Systems Engineering" in profile.headline else _natural_project_summary(profile, plan)
+    return _natural_project_summary(profile, plan)
 
 
 def _trace_from_tailoring_plan(plan: TailoringPlan) -> dict[str, Any]:
@@ -1864,6 +1888,7 @@ def generate_local_content(
         experience=selected_experience,
         projects=selected_projects,
         coursework=selected_coursework,
+        compact_coursework=True,
         certifications=selected_certifications,
         languages=_languages_for_job(job, profile, classification),
         research_interests=research_interests,
@@ -2336,130 +2361,59 @@ def fit_resume_to_one_page(
     max_attempts: int = 12,
 ) -> tuple[TailoredResumeContent, str, bytes, float]:
     fitted = deepcopy(content)
-    last_pdf = b""
-    last_latex = ""
-    last_usage = 0.0
-    last_page_count = 0
-    expansion_attempted = False
-    is_best_resume = content.target_role == "Best Resume"
-    for _ in range(max_attempts):
+    artifact = ("", b"", 0, 0.0)
+    reductions = []
+    for _ in range(max(max_attempts, 32)):
+        _synchronize_plan_after_layout_adjustment(fitted)
         validate_generated_resume(fitted, verified_profile, job)
-        last_latex = render_latex(fitted, verified_profile)
-        last_pdf, last_page_count, last_usage = _compile_latex_artifact(last_latex)
-        if (
-            content.application_type == "PROFILE_PORTFOLIO"
-            and not is_best_resume
-            and last_page_count <= 2
-            and last_usage <= 95
-        ):
-            fitted.quality_checks.one_page = last_page_count == 1
-            fitted.quality_checks.within_two_pages = True
-            fitted.quality_checks.ats_text_clean = True
-            return fitted, last_latex, last_pdf, last_usage
-        if last_page_count > 1 or last_usage > 95:
-            if fitted.research_interests:
-                fitted.research_interests = []
-                continue
-            if is_best_resume and fitted.certifications:
-                # Best Resume prioritizes a one-page overview. Remove the
-                # lowest-ranked certificate before sacrificing project evidence.
-                fitted.certifications.pop()
-                _synchronize_plan_after_layout_adjustment(fitted)
-                continue
-            if _trim_lowest_priority_skill(fitted):
-                continue
-            if fitted.coursework and fitted.classification != "Talent Community":
-                fitted.coursework = []
-                _synchronize_plan_after_layout_adjustment(fitted)
-                continue
-            if fitted.classification == "Talent Community":
-                # Keep verified coursework in company resumes. Reclaim space from
-                # secondary project detail before reducing courses.
-                reduced = False
-                for project in reversed(fitted.projects):
-                    if len(project.bullets) > 1:
-                        project.bullets = project.bullets[:-1]
-                        reduced = True
-                        break
-                if reduced:
-                    continue
-                if len(fitted.coursework) > 1:
-                    fitted.coursework = fitted.coursework[:1]
-                    _synchronize_plan_after_layout_adjustment(fitted)
-                    continue
-            if len(fitted.projects) > 3 and fitted.application_type != "PROFILE_PORTFOLIO":
-                # Keep four meaningful projects by shortening secondary detail
-                # before discarding the lowest-ranked project.
-                reduced = False
-                for project in reversed(fitted.projects):
-                    if len(project.bullets) > 2:
-                        project.bullets = project.bullets[:2]
-                        reduced = True
-                if reduced:
-                    continue
-                fitted.projects.pop()
-                _synchronize_plan_after_layout_adjustment(fitted)
-                expansion_attempted = True
-                continue
-            reduced = False
-            for project in reversed(fitted.projects):
-                if len(project.bullets) > 2:
-                    project.bullets = project.bullets[:2]
-                    reduced = True
-                    break
-            if reduced:
-                continue
-            if fitted.classification != "Talent Community":
-                fitted.coursework = []
-                _synchronize_plan_after_layout_adjustment(fitted)
-            words = _words(fitted.summary)
-            fitted.summary = " ".join(words[:45]).rstrip(".,;") + "."
+        latex = render_latex(fitted, verified_profile)
+        pdf, pages, usage = _compile_latex_artifact(latex)
+        artifact = (latex, pdf, pages, usage)
+        if pages == 1 and usage <= 95:
+            break
+        # Cut the lowest-priority supporting content before touching typography.
+        if fitted.coursework:
+            reductions.append("coursework: " + fitted.coursework[-1].name)
+            fitted.coursework.pop()
             continue
-        if last_usage < 80 and not expansion_attempted:
-            expansion_attempted = True
-            expanded = generate_local_content(job, verified_profile, project_limit=4)
-            changed = False
-            expanded_by_name = {project.name: project for project in expanded.projects}
-            for project in fitted.projects:
-                source = expanded_by_name.get(project.name)
-                if source and len(project.bullets) < len(source.bullets):
-                    project.bullets = source.bullets[:3]
-                    changed = True
-                    break
-            if changed:
-                continue
-            if (
-                len(fitted.projects) < len(expanded.projects)
-                and expanded.projects[-1].relevance_score >= 55
-                and _fourth_project_adds_value(expanded.projects)
-                and _maps_fourth_project_allowed(
-                    job, fitted.classification, expanded.projects
-                )
-            ):
-                fitted.projects = expanded.projects
-                _synchronize_plan_after_layout_adjustment(fitted)
-                changed = True
-            if not fitted.coursework and verified_profile.coursework_json and fitted.application_type != "PROFILE_PORTFOLIO":
-                courses = _select_courses(
-                    job, verified_profile, fitted.classification, limit=2
-                )
-                if courses:
-                    fitted.coursework = [
-                        ResumeCourseItem.model_validate(course) for course in courses
-                    ]
-                    _synchronize_plan_after_layout_adjustment(fitted)
-                    changed = True
-            if changed:
-                continue
-        fitted.quality_checks.one_page = True
-        fitted.quality_checks.ats_text_clean = True
-        return fitted, last_latex, last_pdf, last_usage
-    max_pages = 2 if content.application_type == "PROFILE_PORTFOLIO" and not is_best_resume else 1
-    if not last_pdf or last_page_count > max_pages:
-        raise RuntimeError(f"Resume fitting could not produce a PDF within {max_pages} page(s).")
-    fitted.quality_checks.one_page = last_page_count == 1
-    fitted.quality_checks.within_two_pages = last_page_count <= 2
-    return fitted, last_latex, last_pdf, last_usage
+        secondary = next((p for p in reversed(fitted.projects) if len(p.bullets) > 2), None)
+        if secondary:
+            secondary.bullets.pop()
+            reductions.append("secondary project detail: " + secondary.name)
+            continue
+        if fitted.certifications:
+            fitted.certifications.pop()
+            reductions.append("secondary certification")
+            continue
+        if _trim_lowest_priority_skill(fitted):
+            reductions.append("lowest-priority skill")
+            continue
+        if len(fitted.projects) > 2:
+            reductions.append("lowest-priority project: " + fitted.projects[-1].name)
+            fitted.projects.pop()
+            continue
+        if fitted.section_spacing_reduction < 2:
+            fitted.section_spacing_reduction += 0.5
+            reductions.append("moderate section spacing")
+            continue
+        raise RuntimeError("Verified resume content cannot fit one page without sacrificing readability.")
+    else:
+        raise RuntimeError("Resume fitting could not produce a verified one-page PDF.")
+    # Expand transactionally: a failed trial never triggers a destructive trim.
+    fitted, artifact = _expand_project_details_to_fit(fitted, job, verified_profile, artifact)
+    if artifact[3] < 88 and not reductions:
+        fitted, artifact = _expand_supporting_evidence_to_fit(fitted, job, verified_profile, artifact)
+    _synchronize_plan_after_layout_adjustment(fitted)
+    fitted.quality_checks.one_page = True
+    fitted.quality_checks.within_two_pages = True
+    fitted.quality_checks.ats_text_clean = True
+    fitted.tailoring_trace["layout_review"] = {
+        "pages": 1, "vertical_utilization": artifact[3],
+        "expansion_threshold": 88, "maximum_utilization": 95,
+        "reductions": reductions,
+        "remaining_space_reason": "Only relevant source-backed details that fit are accepted; remaining whitespace is preserved.",
+    }
+    return fitted, artifact[0], artifact[1], artifact[3]
 
 
 def content_hash(content: TailoredResumeContent, latex_source: str) -> str:
@@ -2514,14 +2468,9 @@ def generate_resume(job: Any, profile: Any, generation_id: int) -> tuple[Tailore
         validate_master_profile(profile)
         content = generate_structured_content(job, profile)
         _log_tailoring_trace(generation_id, content)
-        if content.application_type == "KOSPIE_PROGRAM":
-            content, latex_source, pdf_bytes, utilization = fit_kospie_resume_to_two_pages(
-                content, job, profile
-            )
-        else:
-            content, latex_source, pdf_bytes, utilization = fit_resume_to_one_page(
-                content, job, profile
-            )
+        content, latex_source, pdf_bytes, utilization = fit_resume_to_one_page(
+            content, job, profile
+        )
         logger.info(
             "Resume generation %s compiled in %.2fs using %s (vertical utilization %.1f%%)",
             generation_id,
@@ -2539,3 +2488,180 @@ def generate_resume(job: Any, profile: Any, generation_id: int) -> tuple[Tailore
             time.monotonic() - started,
         )
         raise
+
+
+def _expand_project_details_to_fit(content, job, profile, artifact):
+    """Add source-backed detail only when the rendered PDF has room for it.
+
+    Trial copies ensure an overflowing bullet never removes existing content
+    or changes typography. Curated variants are handled before this helper.
+    """
+    fitted = content
+    sources = _profile_project_map(profile)
+    for index, project in enumerate(content.projects):
+        if artifact[3] >= 88:
+            break
+        source = sources.get(project.name)
+        if not source:
+            continue
+        family = _role_evidence_family((content.tailoring_plan or {}).get("role_categories", _role_categories(job)))
+        source = project_role_view(source, family)
+        detail = source.get("role_detail_bullets", {}).get(family, source.get("resume_detail_bullets", []))
+        candidates = [*_project_bullets(source), *_project_bullets({"bullets": detail})]
+        for bullet in candidates:
+            current = fitted.projects[index]
+            if len(current.bullets) >= 3 or artifact[3] >= 88:
+                break
+            normalized = re.sub(r"\W+", " ", bullet.lower()).strip()
+            if any(re.sub(r"\W+", " ", b.lower()).strip() == normalized for b in current.bullets):
+                continue
+            trial = deepcopy(fitted)
+            trial.projects[index].bullets.append(bullet)
+            try:
+                validate_generated_resume(trial, profile, job)
+            except ValueError:
+                continue
+            latex = render_latex(trial, profile)
+            try:
+                pdf, pages, usage = _compile_latex_artifact(latex)
+            except RuntimeError:
+                continue  # Optional detail must not invalidate the proven base PDF.
+            if pages == 1 and usage <= 95:
+                fitted = trial
+                artifact = (latex, pdf, pages, usage)
+    return fitted, artifact
+
+
+
+def _expand_supporting_evidence_to_fit(content, job, profile, artifact):
+    fitted = content
+    plan = _scoped_tailoring_plan(job, profile, project_limit=4)
+    if plan is None:
+        return fitted, artifact
+    courses = {c["name"]: c for c in profile.coursework_json if isinstance(c, dict)}
+    candidates = select_relevant_coursework(plan, profile)
+
+    def accept(trial):
+        _synchronize_plan_after_layout_adjustment(trial)
+        try:
+            validate_generated_resume(trial, profile, job)
+            latex = render_latex(trial, profile)
+            pdf, pages, usage = _compile_latex_artifact(latex)
+        except (ValueError, RuntimeError):
+            return None
+        return (latex, pdf, pages, usage) if pages == 1 and usage <= 95 else None
+
+    for name in candidates:
+        if artifact[3] >= 88 or len(fitted.coursework) >= 5:
+            break
+        if name in {c.name for c in fitted.coursework}:
+            continue
+        trial = deepcopy(fitted)
+        source = courses[name]
+        trial.compact_coursework = True
+        trial.coursework.append(ResumeCourseItem(name=name, institution=source.get("institution", "")))
+        result = accept(trial)
+        if result:
+            fitted, artifact = trial, result
+    registry = build_verified_skill_registry(profile)
+    family = _role_evidence_family(plan.role_categories)
+    sources = _profile_project_map(profile)
+    # Only the selected projects' role-specific skills can use remaining space.
+    # An unrelated registry keyword cannot become a layout filler.
+    skills = list(dict.fromkeys(
+        canonicalize_skill(skill)
+        for project in fitted.projects
+        for skill in project_role_view(sources[project.name], family).get("technologies", [])
+    ))
+    for skill in skills:
+        if artifact[3] >= 88 or len(fitted.selected_skills) >= 24:
+            break
+        if skill in fitted.selected_skills or skill not in registry:
+            continue
+        if ({skill} | set(fitted.selected_skills)) >= {"FPGA", "FPGA Design"}:
+            if skill in {"FPGA", "FPGA Design"}:
+                continue
+        trial = deepcopy(fitted)
+        selected, groups = _skill_categories_from_plan([(1, s) for s in [*trial.selected_skills, skill]])
+        if skill not in selected or not set(fitted.selected_skills) <= set(selected):
+            continue
+        trial.selected_skills = selected
+        trial.skill_categories = [ResumeSkillGroup.model_validate(g) for g in groups]
+        trial.job_skill_matches.append(ResumeSkillMatch(
+            skill=skill, category=next(g["name"] for g in groups if skill in g["items"]),
+            match_type="contextual", score=20, reason="Verified in a selected role-relevant project.",
+            evidence=registry[skill]["evidence"],
+        ))
+        result = accept(trial)
+        if result:
+            fitted, artifact = trial, result
+    return fitted, artifact
+
+
+
+def _research_narrative(profile: Any, plan: TailoringPlan) -> tuple[str, str] | None:
+    if not any("Research" in role for role in plan.role_categories):
+        return None
+    sources = _profile_project_map(profile)
+    projects = [sources[name] for name in plan.resume_decisions.selected_projects if name in sources]
+    capabilities = set().union(*(_demonstrated_capabilities(source) for source in projects))
+    domains = [label for capability, label in (
+        ("feedback control", "embedded control"), ("multi-axis robotics", "robotic systems integration"),
+        ("digital design", "digital design"), ("image processing", "image processing"),
+        ("backend services", "software systems"), ("physical sensing", "sensor integration"),
+    ) if capability in capabilities][:3]
+    tasks = [label for capability, label in (
+        ("feedback control", "feedback control"), ("multi-axis robotics", "multi-axis robot integration"),
+        ("digital design", "digital logic development"), ("image processing", "image processing"),
+        ("remote integration", "communication interfaces"), ("validation", "simulation and testing"),
+    ) if capability in capabilities][:2]
+    available = {canonicalize_skill(skill) for source in projects for skill in source.get("technologies", [])}
+    technologies = [skill for skill in ("C++", "Python", "ESP32", "FreeRTOS", "Verilog", "FPGA", "OpenCV", "UART", "Linux")
+                    if skill in available][:4]
+    if not domains or not tasks or not technologies:
+        return None
+
+    def joined(items: list[str]) -> str:
+        return ", ".join(items[:-1]) + ", and " + items[-1] if len(items) > 2 else " and ".join(items)
+
+    summary = (
+        f"{sanitize_resume_text(profile.headline)} with project experience in {joined(domains)}. "
+        f"Work includes {joined(tasks)} using {joined(technologies)}. "
+        "Interested in applying this experience to experimental engineering research."
+    )
+    if not 30 <= len(_words(summary)) <= 55:
+        return None
+    focus = "Embedded Control & Robotics" if {"feedback control", "multi-axis robotics"} <= capabilities else joined(domains[:2]).title()
+    return focus, summary
+
+
+
+def _natural_project_summary(profile, plan):
+    skills = plan.resume_decisions.selected_skills[:3]
+    sources = _profile_project_map(profile)
+    text = " ".join(str(sources.get(name, {}).get("verified_features", [])) +
+                    str(sources.get(name, {}).get("bullets", []))
+                    for name in plan.resume_decisions.selected_projects).lower()
+    topics = []
+    for phrase, signals in (
+        ("feedback control", ("pid", "encoder")),
+        ("sensor integration", ("sensor", "acquisition")),
+        ("digital design and simulation", ("testbench", "verilog")),
+        ("backend APIs and persistent data", ("fastapi", "database", "postgresql")),
+        ("conversational interfaces", ("gemini live", "streaming audio")),
+        ("hardware-software integration", ("uart", "hardware-software", "embedded controller")),
+    ):
+        if any(signal in text for signal in signals):
+            topics.append(phrase)
+    headline = sanitize_resume_text(profile.headline).split("|")[0].strip()
+    for count in (3, 2, 1, 0):
+        topic_text = ", ".join(topics[:count]) or "technical project implementation"
+        skill_text = ", ".join(skills[:count]) or "engineering tools"
+        summary = (
+            f"{headline} with hands-on project experience using {skill_text}. "
+            f"Project work includes {topic_text}, connecting software components with practical engineering systems. "
+            "Interested in applying this background to technical development and experimental engineering work."
+        )
+        if 30 <= len(_words(summary)) <= 55:
+            return summary
+    raise ValueError("Profile headline is too long for a concise resume summary.")

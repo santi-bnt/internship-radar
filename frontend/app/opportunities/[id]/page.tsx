@@ -1,0 +1,24 @@
+"use client";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api, formatDate } from "@/lib/api";
+import { inputOf, Opportunity, safeWebsite } from "@/lib/opportunities";
+import { OpportunityEditor } from "@/components/OpportunityEditor";
+
+export default function OpportunityDetailsPage() {
+  const {id} = useParams<{id: string}>();
+  const [item, setItem] = useState<Opportunity | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {let cancelled = false; api<Opportunity>(`/api/opportunities/${id}`).then(v => {if (!cancelled) setItem(v);}).catch(e => {if (!cancelled) setError(e.message);}); return () => {cancelled = true;};}, [id]);
+  return <><Link href="/opportunities">← Opportunities</Link>{error && <p className="notice" role="alert">{error}</p>}{!item ? <p>{error ? "Opportunity unavailable." : "Loading opportunity…"}</p> : <>
+    <header className="page-header"><div><p className="eyebrow">{item.organization} · {item.country}</p><h1>{item.program}</h1><p className="page-subtitle">{item.program_type} · {item.status} · {item.priority} priority</p></div><div className="header-actions"><button className="button" onClick={() => setEditing(!editing)}>{editing ? "Close Editor" : "Edit Opportunity"}</button><a className="button secondary" href={safeWebsite(item.official_url)} target="_blank" rel="noopener noreferrer">Official Website</a><Link className="button secondary" href={`/jobs/${item.id}`}>CV & application workspace</Link></div></header>
+    {editing ? <section className="card"><h2>Edit all opportunity fields</h2><p>Only record information supported by the source. Use Unknown when unconfirmed.</p><OpportunityEditor key={item.updated_at} initial={inputOf(item)} onCancel={() => setEditing(false)} onSave={async v => {setItem(await api<Opportunity>(`/api/opportunities/${id}`, {method: "PUT", body: JSON.stringify(v)})); setEditing(false);}} /></section> : <div className="opportunity-detail-grid">
+      <section className="card"><h2>Overview</h2><p className="opportunity-preserve">{item.description || "Unknown"}</p><h3>Research areas</h3><div className="opportunity-tags">{item.research_areas.length ? item.research_areas.map(a => <span className="opportunity-badge area" key={a}>{a}</span>) : "Unknown"}</div><h3>Professors or laboratories</h3><p>{[item.professor, item.lab].filter(Boolean).join(" · ") || "Unknown"}</p><h3>Notes</h3><p className="opportunity-preserve">{item.notes || "Unknown"}</p><h3>Application link</h3>{safeWebsite(item.application_url) ? <a href={safeWebsite(item.application_url)} target="_blank" rel="noopener noreferrer">Open application</a> : <p>Unknown — consult the official website.</p>}</section>
+      <section className="card"><h2>Why it matches my profile</h2><strong className="opportunity-score">{item.fit_score === null ? `${item.compatibility_level} match` : `${item.fit_score}/100`}</strong><ul>{item.fit_reasons.map(r => <li key={r}>{r}</li>)}</ul><p>Interest fit only. This does not certify personal eligibility or predict admission. Unknown fields receive no bonus.</p><h3>Eligibility</h3><p>{item.international_eligibility}</p><p className="opportunity-preserve">{item.eligibility_notes || "Unknown"}</p><dl><div><dt>Undergraduates</dt><dd>{item.undergraduate_eligible}</dd></div><div><dt>Citizenship restriction</dt><dd>{item.citizenship_restriction}</dd></div><div><dt>Host required</dt><dd>{item.host_required}</dd></div></dl></section>
+      <section className="card"><h2>Funding</h2><p>{item.funding.join(", ")}</p><p className="opportunity-preserve">{item.funding_notes || "Unknown"}</p><h3>Deadline</h3><p>{item.deadline ? formatDate(item.deadline) : "Unknown"}</p>{item.deadline_at && <p>Exact deadline: {item.deadline_at}</p>}<p>{item.deadline_notes || "Unknown"}</p><h3>Application status</h3><p>{item.status}</p><h3>Employment</h3><p>{item.employment_type}</p><h3>Required documents</h3>{item.required_documents.length ? <ul>{item.required_documents.map(d => <li key={d}>{d}</li>)}</ul> : <p>Unknown</p>}<h3>Recommendation letters</h3><p>{item.recommendation_letters}</p><p>{item.recommendation_notes || "Unknown"}</p></section>
+      <section className="card"><h2>Sources</h2><p>{item.provenance?.kind || "Existing opportunity record"}{item.provenance?.verified_on ? ` · checked ${item.provenance.verified_on}` : ""}</p><p>Published information can change. Follow the source for current terms.</p><ul>{Array.from(new Set([item.official_url, ...item.supporting_urls])).filter(safeWebsite).map(url => <li key={url}><a href={safeWebsite(url)} target="_blank" rel="noopener noreferrer">{url}</a></li>)}</ul><p>Added: {formatDate(item.created_at)} · Updated: {formatDate(item.updated_at)}</p></section>
+    </div>}
+  </>}</>;
+}

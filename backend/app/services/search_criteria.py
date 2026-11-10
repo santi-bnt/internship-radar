@@ -193,7 +193,7 @@ def discovery_search_terms(criteria: dict[str, Any] | None) -> list[str]:
 
 
 def _posted_datetime(job: object) -> datetime | None:
-    for field in ("official_posted_at", "source_posted_at", "posted_at", "first_seen_at"):
+    for field in ("official_posted_at", "source_posted_at", "posted_at"):
         value = _job_value(job, field, None)
         if isinstance(value, datetime):
             return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
@@ -251,7 +251,8 @@ def matches_discovery_criteria(
         *(criteria.get("states") or []),
         *(criteria.get("cities") or []),
     ]
-    if locations and not location_matches(job, locations):
+    unknown_location = normalized_token(_job_value(job, "country", "Unknown")) in {"", "unknown"}
+    if locations and not location_matches(job, locations) and not (unknown_location and criteria.get("allow_unknown_location")):
         return False, {"location": False}
 
     categories = criteria.get("role_categories") or []

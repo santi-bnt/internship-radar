@@ -27,6 +27,9 @@
 \setlist[itemize]{leftmargin=1.15em,itemsep=1.5pt,topsep=2.5pt,parsep=0pt,partopsep=0pt}
 \newcommand{\sectionheading}[1]{\vspace{5.5pt}{\large\bfseries #1}\par\vspace{1.5pt}\hrule\vspace{3.5pt}}
 {% endif %}
+{% if content.section_spacing_reduction > 0 %}
+\renewcommand{\sectionheading}[1]{\vspace{ {{- 5.5 - content.section_spacing_reduction -}} pt}{\large\bfseries #1}\par\vspace{1.5pt}\hrule\vspace{ {{- 3.5 - content.section_spacing_reduction -}} pt}}
+{% endif %}
 \newcommand{\resumelink}[2]{\href{#1}{#2}}
 \newcommand{\skillsrow}[2]{ {\bfseries #1:} #2\par}
 \newcommand{\educationentry}[5]{
@@ -58,7 +61,7 @@
 {% macro render_skills() -%}
 {% set groups = content.skill_categories|selectattr("items")|list %}
 {% if groups %}\sectionheading{ {{- "Technical Skills" if content.classification == "KOSPIE / Germany Engineering" else "Skills" -}} }
-{% for group in groups %}\skillsrow{ {{- group.name|latex -}} }{ {{- group["items"]|join(", ")|latex -}} }
+{% for group in groups %}\skillsrow{ {{- group.name|latex -}} }{ {%- for skill in group["items"] -%}{% if not loop.first %}, {% endif %}{{ content.skill_display_names.get(skill, skill)|latex }}{%- endfor -%} }
 {% endfor %}{% endif %}
 {%- endmacro %}
 
@@ -87,12 +90,12 @@
 {% macro render_projects() -%}
 {% if content.projects %}\sectionheading{Projects}
 {% for item in content.projects %}\projectheading
-{ {{- item.name|latex -}} }
+{ {{- (item.display_name or item.name)|latex -}} }
 { {{- item.technologies|join(", ")|latex -}} }
 { {{- item.dates|latex -}} }
 { {{- item.github_url|latex -}} }
 { {{- item.live_url|latex -}} }
-{% if item.project_type_label %}{\small\textit{ {{- item.project_type_label|latex -}} }\par}{% endif %}
+{% if item.project_type_label %}{% if content.presentation_profile == "cognizant_ai_aiops" %}{{ item.project_type_label|latex }}\par{% else %}{\small\textit{ {{- item.project_type_label|latex -}} }\par}{% endif %}{% endif %}
 {{ bullet_list(item.bullets) }}
 {% endfor %}{% endif %}
 {%- endmacro %}
@@ -105,8 +108,12 @@
 
 {% macro render_coursework() -%}
 {% if content.coursework %}\sectionheading{ {{- "Courses" if content.classification == "KOSPIE / Germany Engineering" else "Relevant Coursework" -}} }
-{% if content.classification == "KOSPIE / Germany Engineering" %}
+{% if content.compact_coursework %}
+{% for item in content.coursework %}{% if not loop.first %}; {% endif %}{{ item.name|latex }}{% endfor %}\par
+{% elif content.classification == "KOSPIE / Germany Engineering" %}
 {% for item in content.coursework %}{% if not loop.first %} \textbar{} {% endif %}{{ item.name|latex }}{% endfor %}\par
+{% elif content.presentation_profile == "cognizant_ai_aiops" %}
+{% for item in content.coursework %}{% if not loop.first %}; {% endif %}{{ item.name|latex }}{% if item.institution %}, {{ item.institution|latex }}{% endif %}{% endfor %}\par
 {% else %}
 {% for item in content.coursework %}{\bfseries {{ item.name|latex }}} --- {{ item.institution|latex }}{% if item.issued %}\hfill {{ item.issued|latex }}{% endif %}\par
 {% endfor %}
@@ -122,7 +129,7 @@
 
 {% macro render_languages() -%}
 {% if content.languages %}\sectionheading{Languages}
-{% for language in content.languages %}{% if not loop.first %} \textbar{} {% endif %}{{ language|latex }}{% endfor %}
+{% for language in content.languages %}{% if not loop.first %} \textbar{} {% endif %}{% if content.presentation_profile == "epfl_e3_2027" %}{{ language.split(" — ")[0]|latex }} \textemdash{} {{ language.split(" — ")[1]|latex }}{% else %}{{ language|latex }}{% endif %}{% endfor %}
 {% endif %}
 {%- endmacro %}
 

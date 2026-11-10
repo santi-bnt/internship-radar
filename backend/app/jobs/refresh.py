@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -22,7 +23,8 @@ from app.services.classification import (
     urgency_label,
 )
 from app.services.application_urls import resolve_application_url
-from app.services.dedupe import find_duplicate
+from app.services.dedupe import find_duplicate, possible_duplicate
+from app.services.discovery_records import record_discovery, record_absence, snapshot_description, detect_ats
 from app.services.email_service import EmailService
 from app.services.eligibility import apply_job_eligibility_signals, discovery_search_plan
 from app.services.education_eligibility import apply_job_education_requirements
@@ -39,12 +41,12 @@ from app.services.research_application_status import (
     is_research_internship,
 )
 from app.services.job_revalidation import is_revalidation_due, revalidate_job
-from app.services.verification import verify_official_application
+from app.services.verification import verify_official_application, NON_OFFICIAL_HOSTS
 from app.services.seed import seed_profile_and_sources
 from app.services.target_companies import normalize_company_name, priority_bonus
 from app.services.user_priority import is_user_priority_pinned
 from app.sources.workday import WorkdayAdapter
-from app.services.discovery_orchestration import mark_source_failure, mark_source_success
+from app.services.discovery_orchestration import mark_source_failure, mark_source_success, source_is_due, _aware
 from app.services.force_apply import apply_requested_santiago_overrides
 from app.sources import create_adapter
 from app.sources.community import repository_health
@@ -94,7 +96,7 @@ async def collect_with_retry(adapter: Any, attempts: int = 3) -> list[Any]:
             # Retry-After rather than retried immediately in this worker.
             if state != "TEMPORARY_FAILURE" or attempt == attempts - 1:
                 raise
-            await asyncio.sleep(0.5 * (2 ** attempt))
+            await asyncio.sleep(0.5 * (2 ** attempt) + random.uniform(0, .25))
     return []
 
 
@@ -366,6 +368,8 @@ def _update_job(job: Job, data: dict[str, Any]) -> None:
     for key, new_value in data.items():
         if key in derived_fields:
             continue
+        if key == "posted_at" and new_value is None and getattr(job, "posted_at", None) is not None:
+            continue  # Unknown on a refresh must not erase a known original date.
         if key == "raw_data" and isinstance(new_value, dict) and is_user_priority_pinned(job):
             new_value = {**new_value, "_radar_user_priority": job.raw_data["_radar_user_priority"]}
         if key == "raw_data" and isinstance(new_value, dict):
@@ -393,6 +397,17 @@ def _official_candidate(data: dict[str, Any]) -> bool:
             and data.get("verification_status") == "verified"
         )
     )
+
+
+def _official_source_rank(url: str) -> int:
+    host = (urlsplit(url or "").hostname or "").lower()
+    if host in NON_OFFICIAL_HOSTS:
+        return 2
+    if detect_ats(url) != "unknown":
+        return 4
+    if host.endswith((".edu", ".ac.uk", ".mcgill.ca", ".epfl.ch")) or host in {"epfl.ch", "mcgill.ca"}:
+        return 3
+    return 5 if host else 0
 
 
 def _merge_duplicate(job: Job, data: dict[str, Any]) -> None:
@@ -424,21 +439,21 @@ def _merge_duplicate(job: Job, data: dict[str, Any]) -> None:
         job.official_apply_url
         or (job.official_status == "open" and job.verification_status == "verified")
     )
-    if existing_official and not _official_candidate(data):
+    authoritative_terminal = data.get("official_status") in {"closed", "expired", "unavailable"} and data.get("verification_status") in {"verified", "dead"} and bool(data.get("official_apply_url"))
+    weaker_than_verified = getattr(job, "verification_status", "") == "verified" and data.get("verification_status") != "verified" and not authoritative_terminal
+    preferred_existing_source = getattr(job, "verification_status", "") == "verified" and data.get("verification_status") == "verified" and not authoritative_terminal and _official_source_rank(getattr(job, "canonical_official_url", "") or getattr(job, "official_apply_url", "")) > _official_source_rank(data.get("canonical_official_url") or data.get("official_apply_url") or "")
+    if (existing_official and not _official_candidate(data)) or weaker_than_verified or preferred_existing_source:
         job.last_seen_at = datetime.now(timezone.utc)
         job.last_checked_at = datetime.now(timezone.utc)
-        job.missing_refreshes = 0
+        # An aggregator sighting cannot reset authoritative-board absence.
         return
     # Discovery facts may change, but an application is user history, not
     # source metadata. Reimporting an already-applied requisition must update
     # its canonical/source fields without putting it back in the job queue.
-    preserve_application_state = str(job.status or "").casefold() == "applied"
-    application_state = {
-        "status": job.status,
-        "is_active": job.is_active,
-        "applied_at": job.applied_at,
-        "submitted_resume_id": job.submitted_resume_id,
-    } if preserve_application_state else None
+    preserve_application_state = str(getattr(job, "status", "") or "").casefold() == "applied"
+    application_state = {field: getattr(job, field) for field in (
+        "status", "is_active", "applied_at", "submitted_resume_id",
+    ) if hasattr(job, field)} if preserve_application_state else None
     original_discovery_source = job.discovered_from_source
     original_discovery_sources = list(job.discovery_sources or [])
     original_markers = list(job.community_markers or [])
@@ -448,6 +463,10 @@ def _merge_duplicate(job: Job, data: dict[str, Any]) -> None:
             "status": "applied",
             "applied_at": getattr(job, "applied_at", None) or data.get("applied_at"),
         }
+    data = dict(data)
+    for field in ("company", "country", "location", "city", "region"):
+        if str(data.get(field, "")).strip().casefold() in {"", "unknown"} and str(getattr(job, field, "") or "").strip().casefold() not in {"", "unknown"}:
+            data.pop(field, None)
     _update_job(job, data)
     job.discovered_from_source = original_discovery_source or data.get("discovered_from_source", "")
     job.discovery_sources = original_discovery_sources
@@ -468,18 +487,15 @@ def _apply_verification_failures(existing: Job | None, data: dict[str, Any]) -> 
         data["verification_failures"] = 0
         return
 
+    method = data.get("verification_method", "not_attempted")
+    if method in {"not_attempted", "external_discovery"}:
+        return
     failures = (existing.verification_failures if existing else 0) + 1
     data["verification_failures"] = failures
     base_reason = data.get("status_reason") or "The official application could not be confirmed."
-    if failures == 1:
-        data["status_reason"] = f"Needs Verification: {base_reason}"
-    elif failures == 2:
-        data["status_reason"] = f"Probably Closed: {base_reason}"
-    else:
-        data["official_status"] = "unavailable"
-        data["verification_status"] = "verification_failed"
-        data["is_active"] = False
-        data["status_reason"] = "Closed after three consecutive official verification failures."
+    # Network/auth/parser failures are not proof that a posting is closed.
+    # Only explicit closure or repeated authoritative-board absence may close it.
+    data["status_reason"] = f"Needs Verification: {base_reason}"
 
 
 async def refresh_all_sources(
@@ -488,13 +504,16 @@ async def refresh_all_sources(
     source_ids: set[int] | None = None,
     criteria: dict[str, Any] | None = None,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    injected_jobs: dict[int, list[Any]] | None = None,
+    send_notifications: bool = True,
+    allow_outside_profile_locations: bool = False,
 ) -> dict[str, Any]:
     profile = db.scalar(select(UserProfile).limit(1))
     if profile is None:
         raise RuntimeError("Profile must be seeded before refreshing jobs")
 
     sources = list(db.scalars(select(CompanySource).where(
-        CompanySource.enabled.is_(True),
+        CompanySource.id.in_(list(injected_jobs)) if injected_jobs is not None else CompanySource.enabled.is_(True),
         CompanySource.reference_only.is_(False),
     )))
     registry_order = {
@@ -506,6 +525,11 @@ async def refresh_all_sources(
         sources = [source for source in sources if source.source_type in source_types]
     if source_ids is not None:
         sources = [source for source in sources if source.id in source_ids]
+    if injected_jobs is None:
+        now = datetime.now(timezone.utc)
+        sources = [s for s in sources if not any(_aware(getattr(s, field, None)) and _aware(getattr(s, field, None)) > now for field in ("backoff_until", "rate_limited_until"))]
+        if db.info.get("respect_discovery_cadence"):
+            sources = [s for s in sources if source_is_due(s, now)]
     targets = list(db.scalars(select(TargetCompany).where(TargetCompany.enabled.is_(True))))
     sources = select_sources_for_criteria(sources, criteria, targets)
     # Every entry point, including the manual trigger, has a bounded source
@@ -558,7 +582,10 @@ async def refresh_all_sources(
         source_company = source.company
         before_created = summary["jobs_created"]
         before_updated = summary["jobs_updated"]
+        before_closed = summary["jobs_closed"]
         before_ignored = summary["jobs_ignored"]
+        before_counters = {key: value for key, value in summary.items() if isinstance(value, int)}
+        before_matches = dict(summary["matched_jobs"])
         source_duplicates = 0
         source_verified = 0
         source_unverified = 0
@@ -573,10 +600,21 @@ async def refresh_all_sources(
                 "source_type": source.source_type,
             }))
             adapter = create_adapter(source, search_criteria=criteria)
-            normalized_jobs = await collect_with_retry(adapter)
+            collection_owner = profile.owner_user_id
+            # Do not hold a SQLite read transaction across network requests.
+            db.commit()
+            normalized_jobs = injected_jobs[source.id] if injected_jobs is not None else await collect_with_retry(adapter)
             summary["jobs_fetched"] += len(normalized_jobs)
+            # Serialize identity checks per candidate after network reads. A
+            # concurrent source must not use a stale pre-fetch duplicate list.
+            from app.services.opportunity_dashboard import lock_collection
+            db.commit()  # Finish the read transaction before SQLite BEGIN IMMEDIATE.
+            lock_collection(db, collection_owner)
+            existing = list(db.scalars(select(Job).where(Job.owner_user_id == collection_owner)))
             for normalized in normalized_jobs:
                 data = normalized.to_dict()
+                if is_research_internship(normalized) or source.source_type == "research":
+                    data["opportunity_type"] = "research"
                 from app.services.talent_communities import is_talent_community, store_discovered_community
                 if is_talent_community(data["title"], data.get("apply_url", "")):
                     store_discovered_community(db, profile.owner_user_id, data)
@@ -639,7 +677,7 @@ async def refresh_all_sources(
                     continue
                 duplicate = find_duplicate(existing, data)
                 allowed, _ = location_allowed(data, profile)
-                if not allowed:
+                if not allowed and not allow_outside_profile_locations:
                     summary["jobs_ignored"] += 1
                     continue
                 previous_state = _job_state(duplicate)
@@ -663,11 +701,13 @@ async def refresh_all_sources(
                         duplicate.archived_at = datetime.now(timezone.utc)
                 if duplicate:
                     source_duplicates += 1
+                    snapshot_description(db, duplicate)
                     _merge_duplicate(duplicate, data)
                     job = duplicate
                     is_new = False
                     summary["jobs_updated"] += 1
                 else:
+                    duplicate_confidence, duplicate_candidate = possible_duplicate(existing, data)
                     data["owner_user_id"] = profile.owner_user_id
                     job = Job(**data)
                     db.add(job)
@@ -677,6 +717,10 @@ async def refresh_all_sources(
                     summary["jobs_created"] += 1
                 seen_job_ids.add(job.id)
                 persist_analysis(db, job, profile)
+                discovery_state = record_discovery(db, job, data)
+                if is_new and duplicate_candidate is not None:
+                    discovery_state.duplicate_confidence = duplicate_confidence
+                    discovery_state.duplicate_candidate_id = duplicate_candidate.id
                 if matches_eligibility_criteria(job, criteria) and job.status in {"active", "saved"}:
                     first_match = str(job.id) not in summary["matched_jobs"]
                     summary["matched_jobs"][str(job.id)] = {
@@ -712,11 +756,11 @@ async def refresh_all_sources(
 
             source_jobs = (
                 list(db.scalars(select(Job).where(Job.source_url == source.source_url)))
-                if criteria is None
+                if (criteria is None or getattr(adapter, "all_external_ids", None) is not None) and injected_jobs is None and getattr(adapter, "complete_snapshot", False)
                 else []
             )
             for job in source_jobs:
-                if job.id not in seen_job_ids and job.is_active:
+                if job.id not in seen_job_ids and job.is_active and str(job.external_id or "") not in getattr(adapter, "all_external_ids", set()):
                     previous_state = _job_state(job)
                     job.missing_refreshes += 1
                     job.last_checked_at = datetime.now(timezone.utc)
@@ -740,6 +784,7 @@ async def refresh_all_sources(
                     else:
                         persist_analysis(db, job, profile)
                         notification_events.append((job.id, False, previous_state))
+                    record_absence(db, job, complete_snapshot=True)
 
             source.last_status = "OK"
             source.last_error = None
@@ -764,6 +809,9 @@ async def refresh_all_sources(
             )
             source.source_status = "HEALTHY" if repository_status == "ACTIVE" else "DEGRADED"
             mark_source_success(source, now=datetime.now(timezone.utc))
+            if getattr(adapter, "partial_failure_count", 0):
+                source.source_status = "DEGRADED"
+                source.safe_error_message = "Some posting details could not be fetched; absence checks were skipped."
             logger.info(json.dumps({
                 "event": "source_completed",
                 "company": source_company,
@@ -774,6 +822,11 @@ async def refresh_all_sources(
             }))
         except Exception as exc:
             db.rollback()
+            for key, value in before_counters.items():
+                if key not in {"sources_checked", "jobs_fetched"}:
+                    summary[key] = value
+            summary["matched_jobs"] = before_matches
+            source_duplicates = source_verified = source_unverified = 0
             failure_state, http_status, safe_message = classify_source_failure(exc)
             # rollback expires ORM state, including the timestamp assigned before
             # the request. Reapply it so failed attempts remain observable.
@@ -810,6 +863,10 @@ async def refresh_all_sources(
         source.jobs_verified = source_verified
         source.duration_ms = duration_ms
         metric = {
+            "started_at": attempted_at.isoformat(),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "rate_limited": source.http_status == 429,
+            "closed_detected": summary["jobs_closed"] - before_closed,
             "source_id": source.id,
             "source": source.company,
             "company": source.company,
@@ -832,7 +889,8 @@ async def refresh_all_sources(
         db.commit()
         if progress_callback:
             progress_callback(summary)
-        _dispatch_notifications(db, profile, notification_events)
+        if send_notifications:
+            _dispatch_notifications(db, profile, notification_events)
         if settings.source_rate_limit_seconds:
             await asyncio.sleep(settings.source_rate_limit_seconds)
 

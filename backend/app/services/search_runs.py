@@ -220,6 +220,7 @@ async def execute_search_run(run_id: int) -> None:
                     }
                     db.commit()
 
+                db.info["respect_discovery_cadence"] = run.trigger in {"scheduler", "cron"}
                 summary = (
                     await refresh_all_sources(
                         db,

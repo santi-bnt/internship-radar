@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+from app.services.source_rate_limit import request_hooks
 from bs4 import BeautifulSoup
 
 from app.core.config import settings
@@ -44,6 +45,7 @@ class WorkdayAdapter(JobSourceAdapter):
         validate_public_url(jobs_url)
         found: dict[str, dict[str, Any]] = {}
         async with httpx.AsyncClient(
+            event_hooks=request_hooks(),
             timeout=settings.request_timeout_seconds,
             headers={"User-Agent": settings.user_agent},
             follow_redirects=True,
@@ -87,6 +89,7 @@ class WorkdayAdapter(JobSourceAdapter):
         jobs_url = f"{self.api_url}/jobs"
         validate_public_url(jobs_url)
         async with httpx.AsyncClient(
+            event_hooks=request_hooks(),
             timeout=settings.request_timeout_seconds,
             headers={"User-Agent": settings.user_agent},
             follow_redirects=True,
@@ -120,7 +123,7 @@ class WorkdayAdapter(JobSourceAdapter):
                 item for item in listings_by_path.values()
                 if is_target_internship_title(item.get("title", ""))
             ]
-            semaphore = asyncio.Semaphore(5)
+            semaphore = asyncio.Semaphore(max(1, settings.discovery_per_domain_concurrency))
 
             async def detail(listing: dict[str, Any]) -> dict[str, Any] | None:
                 path = listing.get("externalPath")

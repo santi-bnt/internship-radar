@@ -28,6 +28,7 @@ CLOSED_PHRASES = (
 BLOCKED_PHRASES = ("captcha", "verify you are human", "sign in to continue", "log in to continue")
 APPLY_PHRASES = ("apply", "apply now", "submit application", "start application")
 NON_OFFICIAL_HOSTS = {
+    "freehire.me", "www.freehire.me",
     "embedded.jobs",
     "www.embedded.jobs",
     "linkedin.com",

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from app.services.source_rate_limit import request_hooks
 
 from app.core.config import settings
 from app.services.company_portal_registry import greenhouse_application_url
@@ -29,24 +30,32 @@ class GreenhouseAdapter(JobSourceAdapter):
     async def fetch_jobs(self) -> list[dict[str, Any]]:
         validate_public_url(self.api_url)
         async with httpx.AsyncClient(
+            event_hooks=request_hooks(),
             timeout=settings.request_timeout_seconds,
             headers={"User-Agent": settings.user_agent},
             follow_redirects=True,
         ) as client:
             response = await client.get(self.api_url)
             response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload.get("jobs"), list):
+                raise ValueError("Greenhouse response has no jobs list")
+            self.all_external_ids = {str(j.get("id")) for j in payload["jobs"]}
+            self.fetched_count = len(payload["jobs"])
             listings = [
                 job
-                for job in response.json().get("jobs", [])
+                for job in payload["jobs"]
                 if self.is_internship_title(job.get("title", ""))
             ]
-            semaphore = asyncio.Semaphore(5)
+            semaphore = asyncio.Semaphore(max(1, settings.discovery_per_domain_concurrency))
 
             async def fetch_detail(listing: dict[str, Any]) -> dict[str, Any] | None:
                 detail_url = f"{self.api_url}/{listing['id']}"
                 validate_public_url(detail_url)
                 try:
                     async with semaphore:
+                        if settings.source_rate_limit_seconds:
+                            await asyncio.sleep(settings.source_rate_limit_seconds)
                         detail_response = await client.get(detail_url)
                         detail_response.raise_for_status()
                     detail = detail_response.json()
@@ -59,6 +68,8 @@ class GreenhouseAdapter(JobSourceAdapter):
             details = await asyncio.gather(
                 *(fetch_detail(listing) for listing in listings)
             )
+        self.complete_snapshot = all(detail is not None for detail in details)
+        self.partial_failure_count = sum(detail is None for detail in details)
         return [detail for detail in details if detail is not None]
 
     def normalize_job(self, raw: dict[str, Any]) -> NormalizedJob:
@@ -72,8 +83,8 @@ class GreenhouseAdapter(JobSourceAdapter):
             location=location,
             description=raw.get("content", ""),
             apply_url=application_url,
-            posted_at=raw.get("updated_at"),
-            official_posted_at=raw.get("updated_at"),
+            posted_at=raw.get("first_published") or raw.get("created_at"),
+            official_posted_at=raw.get("first_published") or raw.get("created_at"),
             original_source_url=official_listing_url,
             official_apply_url=application_url,
             official_status="open",

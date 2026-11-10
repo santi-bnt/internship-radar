@@ -15,6 +15,9 @@ from app.models import (
     Job,
     JobAnalysis,
     Notification,
+    OpportunitySourceObservation,
+    OpportunityDiscoveryState,
+    JobDescriptionSnapshot,
     ResumeProfile,
     SearchRun,
     SearchRunJob,
@@ -525,6 +528,9 @@ def _consolidate_primary_identity() -> None:
             TargetSearchRun,
             SearchRun,
             SearchRunJob,
+            OpportunitySourceObservation,
+            OpportunityDiscoveryState,
+            JobDescriptionSnapshot,
         ):
             db.execute(
                 model.__table__.update()

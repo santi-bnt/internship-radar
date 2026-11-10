@@ -132,6 +132,7 @@ def rank_studio_projects(profile: Any, profile_id: str, limit: int = 4) -> list[
     selected = max(combinations(pool, count), key=value, default=())
     selected_ids = {item["source_index"] for item in selected}
     for rank, item in enumerate(assessed, 1):
+        components = item["components"]
         item["rank"] = rank
         item["selected"] = item["source_index"] in selected_ids
         depth = ", ".join(item["depth_evidence"]) or "limited implementation detail"
